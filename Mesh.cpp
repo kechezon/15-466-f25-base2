@@ -31,10 +31,14 @@ MeshBuffer::MeshBuffer(std::string const &filename) {
 	if (filename.size() >= 5 && filename.substr(filename.size()-5) == ".pnct") {
 		read_chunk(file, "pnct", &data);
 
-		//upload data:
+		//upload data (shove all the data from the file into a VBO)
+		//the GPU doesn't know how to access that data yet.
+		//bind number to GL_ARRAY_BUFFER, do something, unbind to the name
+		//like setting global variable, in a sense.
 		glBindBuffer(GL_ARRAY_BUFFER, buffer);
 		glBufferData(GL_ARRAY_BUFFER, data.size() * sizeof(Vertex), data.data(), GL_STATIC_DRAW);
-		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glBindBuffer(GL_ARRAY_BUFFER, 0); // cleans up buffer so no one else accidentally writes to it
+		// fun fact, you can't use GL in a multi-threaded way!
 
 		total = GLuint(data.size()); //store total for later checks on index
 
@@ -107,22 +111,27 @@ const Mesh &MeshBuffer::lookup(std::string const &name) const {
 }
 
 GLuint MeshBuffer::make_vao_for_program(GLuint program) const {
+
 	//create a new vertex array object:
 	GLuint vao = 0;
-	glGenVertexArrays(1, &vao);
-	glBindVertexArray(vao);
+	glGenVertexArrays(1, &vao); // makes a fresh name
+	glBindVertexArray(vao); // binds the vertex array
 
 	//Try to bind all attributes in this buffer:
 	std::set< GLuint > bound;
 	glBindBuffer(GL_ARRAY_BUFFER, buffer);
 	auto bind_attribute = [&](char const *name, MeshBuffer::Attrib const &attrib) {
 		if (attrib.size == 0) return; //don't bind empty attribs
-		GLint location = glGetAttribLocation(program, name);
+		GLint location = glGetAttribLocation(program, name); // give me the index! the driver could choose any index at compile time
 		if (location == -1) return; //can't bind missing attribs
+		// fun fact: constructing a pointer that refers to nothing is undefined behavior!
+		// Any compiler that compiles this can do whatever it wants, but in practice it will always point to 5. Old machines would panic
+		// at the invalid pointer, but modern ones are fine.
 		glVertexAttribPointer(location, attrib.size, attrib.type, attrib.normalized, attrib.stride, (GLbyte *)0 + attrib.offset);
 		glEnableVertexAttribArray(location);
 		bound.insert(location);
 	};
+	// binds attributes to attribute information object stored
 	bind_attribute("Position", Position);
 	bind_attribute("Normal", Normal);
 	bind_attribute("Color", Color);

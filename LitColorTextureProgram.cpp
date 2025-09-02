@@ -49,20 +49,20 @@ LitColorTextureProgram::LitColorTextureProgram() {
 		//vertex shader:
 		"#version 330\n"
 		"uniform mat4 CLIP_FROM_OBJECT;\n"
-		"uniform mat4x3 LIGHT_FROM_OBJECT;\n"
-		"uniform mat3 LIGHT_FROM_NORMAL;\n"
-		"in vec4 Position;\n"
+		"uniform mat4x3 LIGHT_FROM_OBJECT;\n" // generally multiply matrix x vector. Lets A_FROM_B * B line up well.
+		"uniform mat3 LIGHT_FROM_NORMAL;\n" // uniforms are all caps
+		"in vec4 Position;\n" // input attributes are title case
 		"in vec3 Normal;\n"
 		"in vec4 Color;\n"
 		"in vec2 TexCoord;\n"
-		"out vec3 position;\n"
-		"out vec3 normal;\n"
+		"out vec3 position;\n" // "out"s are eventually getting picked up
+		"out vec3 normal;\n" // outputs are lowercase
 		"out vec4 color;\n"
 		"out vec2 texCoord;\n"
 		"void main() {\n"
 		"	gl_Position = CLIP_FROM_OBJECT * Position;\n"
-		"	position = LIGHT_FROM_OBJECT * Position;\n"
-		"	normal = LIGHT_FROM_NORMAL * Normal;\n"
+		"	position = LIGHT_FROM_OBJECT * Position;\n" // Light Space: space we do lighting computation in
+		"	normal = LIGHT_FROM_NORMAL * Normal;\n" // gives lighting normal (gives direction, NOT position!)
 		"	color = Color;\n"
 		"	texCoord = TexCoord;\n"
 		"}\n"

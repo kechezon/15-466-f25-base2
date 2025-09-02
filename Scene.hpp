@@ -22,6 +22,7 @@
 #include <vector>
 #include <unordered_map>
 
+// Scene is a transformation hierarchy
 struct Scene {
 	struct Transform {
 		//Transform names are useful for debugging and looking up locations in a loaded scene:
@@ -49,12 +50,15 @@ struct Scene {
 		Transform() = default;
 	};
 
+	// a single drawable thing.
+	// These are quite lightweight, since it's all references!
+	// Anything that can be transformed, basically. Think of it like a Unity Game object. 
 	struct Drawable {
 		//a 'Drawable' attaches attribute data to a transform:
 		Drawable(Transform *transform_) : transform(transform_) { assert(transform); }
 		Transform * transform;
 
-		//Contains all the data needed to run the OpenGL pipeline:
+		//Contains all the data needed to run the OpenGL Graphics pipeline:
 		struct Pipeline {
 			GLuint program = 0; //shader program; passed to glUseProgram
 
@@ -116,7 +120,8 @@ struct Scene {
 		float spot_fov = glm::radians(45.0f); //spot cone fov (in radians)
 	};
 
-	//Scenes, of course, may have many of the above objects:
+	//Scenes, of course, may have many of the above objects
+	//(lists so that we don't get iterator invalidation!):
 	std::list< Transform > transforms;
 	std::list< Drawable > drawables;
 	std::list< Camera > cameras;

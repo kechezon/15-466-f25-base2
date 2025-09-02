@@ -40,7 +40,7 @@ struct MeshBuffer {
 	
 	//build a vertex array object that links this vbo to attributes to a program:
 	// note: will throw if program defines attributes not contained in this buffer
-	GLuint make_vao_for_program(GLuint program) const;
+	GLuint make_vao_for_program(GLuint program) const; // pass handle to GLO program
 
 	//This is the OpenGL vertex buffer object containing the mesh data:
 	GLuint buffer = 0;
