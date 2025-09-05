@@ -11,6 +11,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <random>
+#include <cmath>
 
 const float GROUND_LEVEL = 0;
 
@@ -20,6 +21,12 @@ const float GROUND_LEVEL = 0;
 struct GameObject {
 	// for reference, Tireler has a radius of 1 unit
 	Scene::Transform *transform;
+
+	glm::vec3 transform_forward() {
+		// TODO: get forward
+		std::cout << transform->rotation.axis() << std::endl;
+		return {0,0,0};
+	};
 };
 
 struct ColliderCube {
@@ -31,6 +38,10 @@ struct PhysicsObject {
 	glm::vec3<float> velocity; // uses blender convention, so z is up!
 	glm::vec3<float> gravity;
 	float mass;
+
+	float lateralSpeed() {
+		return std::sqrtf(velocity.x * velocity.x, velocity.y * velocity.y);
+	};
 };
 
 struct SquetchearAnimator {
@@ -71,7 +82,7 @@ struct Player {
 	// timers are also used as state components
 
 	// basic movement
-	float TURN_SPEED = 45; // degrees per second. Scales with current lateral
+	float TURN_SPEED = 8 * pi_v; // radians per second. Scales with current lateral
 	float TOP_BASE_SPEED_LATERAL = 10; // units per second^2
 	float GROUND_ACCEL = 10; // units per second^2, applied while accelerating
 	float AIR_ACCEL = 1; // units per second^2, applied while accelerating
@@ -92,17 +103,26 @@ struct Player {
 	PhysicsObject *physicsObject;
 	SquetchearAnimator *animator;
 
-	void turn(float direction) {
+	void turn(float direction, float t) {
 		// TODO (direction = -1 or 1)
 		const glm::vec3 *old_rotation = &(gameObject->transform->rotation);
-		glm::vec3 q = glm::axis(old_rotation);
-		glm::vec3 old_angles = glm::eulerAngles(old_rotation);
+		glm::vec3 axis = glm::axis(old_rotation);
+		glm::vec3 angles = glm::eulerAngles(old_rotation);
 
 		glm::vec3 new_rotation;
+		float angle_delta = TURN_SPEED * direction * -1 * (physicsObject->lateralSpeed() / TOP_BASE_SPEED_LATERAL);
+		angles.z += angle_delta;
+		new_rotation = glm::angleAxis(angles, axis);
+
 		// TODO: apply rotation to old_angles, and construct the new quaternion.
 	};
 
 	void accelerate() {
+		glm::vec3 *rotation = &(gameObject->transform->rotation);
+		glm::vec3 *velocity = &(physicsObject->velocity);
+
+		*velocity += (physicsObject->gravity +  (rotation->forward * (!airborne ? GROUND_ACCEL : AIR_ACCEL))) * t;
+
 		accelerating = true;
 	};
 
@@ -120,8 +140,11 @@ struct Player {
 	};
 
 	bool boost() {
+		glm::vec3 *rotation = &(gameObject->transform->rotation);
+		glm::vec3 *velocity = &(physicsObject->velocity);
 		if (chargeTimer >= CHARGE_TIME) {
 			// TODO: set velocity in forward direction, including jump if in the airborne
+			*velocity = *rotation->forward() * TOP_BASE_SPEED_LATERAL * BOOST_POWER;
 			chargeTimer = 0;
 			return true;
 		}
@@ -132,27 +155,52 @@ struct Player {
 		glm::vec3 *position = &(gameObject->transform->position);
 		glm::vec3 *velocity = &(physicsObject->velocity);
 
-		// physics updates
-		glm::vec2 forwardNorm = glm::normalize({(*velocity).x, (*velocity).y});
-		if (airborne) {
-			*velocity += physicsObject->gravity * t;
-			// add forwardNorm * AIR_ACCEL
-		}
-		else {
-			if (accelerating) {
-				// add forwardNorm * GROUND_ACCEL
-			}
-			else {
-				// subtract forwardNorm * FRICTION_DECEL
-			}
+		/******************
+		 * Physics Updates
+		 ******************/
+		glm::vec2 lat_vel_norm;
+		if (!accelerating && !airborne) {
+			lat_vel_norm = glm::normalize({(*velocity).x, (*velocity).y});
+			(*velocity).x -= lat_vel_norm.x * FRICTION_DECEL;
+			(*velocity).y -= lat_vel_norm.y * FRICTION_DECEL;
 		}
 
+		// clamp lateral speed
+		lat_vel_norm = glm::normalize({(*velocity).x, (*velocity).y});
+		float max_lat_speed = TOP_BASE_SPEED_LATERAL * (boostTimer <= 0 ? 1 : BOOST_POWER);
+		float final_lat_speed = physicsObject->lateralSpeed();
+		if (physicsObject->lateralSpeed() > max_lat_speed) { // bring it down to top speed if exceeding it
+			final_lat_speed = std::max(max_lat_speed, final_lat_speed - (FRICTION_DECEL * 2 * t));
+		}
+		glm::vec2 new_lat_vel = lat_vel_norm * final_lat_speed;
+		(*velocity).x = new_lat_vel.x;
+		(*velocity).y = new_lat_vel.y;
+
+		// Apply gravity
+		*velocity += physicsObject->gravity * t;
+
+		// Update position based on gravity
 		*position += (*velocity * t);
 
-		// game logic updates
-		accelerating = false;
 
-		// animation updates
+		/*************
+		 * Collision logic
+		 ************/
+		// TODO
+
+		/*********************
+		 * Game Logic Updates
+		 *********************/
+		accelerating = false;
+		if (boostTimer > 0) boostTimer = std::clamp(boostTimer - t, 0, BOOST_TIME);
+		if (chargeTimer > 0) chargeTimer = std::clamp(chargeTimer - t, 0, CHARGE_TIME);
+		if (comboTimer > 0) comboTimer = std::clamp(comboTimer - t, 0, COMBO_DURATION);
+		score += physicsObject->lateralSpeed() * t * SCORE_GAIN * multiplier;
+
+		/********************
+		 * Animation Updates
+		 ********************/
+		// TODO
 	};
 }
 
