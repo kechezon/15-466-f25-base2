@@ -1,13 +1,33 @@
 
-BLENDER="C:\Program Files\Blender Foundation\Blender 4.2.1\blender.exe"
+BLENDER="C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"
 DIST=../dist
 
 all : \
-    $(DIST)/hexapod.pnct \
-    $(DIST)/hexapod.scene \
+	$(DIST)/tireler.pnct \
+	$(DIST)/medal.pnct \
+	$(DIST)/meteor.pnct \
+    $(DIST)/spring.pnct \
+	$(DIST)/building.pnct \
+	$(DIST)/tree.pnct \
+	$(DIST)/burnin.scene \
 
-$(DIST)/hexapod.scene : hexapod.blend export-scene.py
-    $(BLENDER) --background --python export-scene.py -- "hexapod.blend:Main" "$(DIST)/hexapod.scene"
+$(DIST)/burnin.scene : burnin.blend export-scene.py
+    $(BLENDER) --background --python export-scene.py -- "burnin.blend:Ground" "$(DIST)/burnin.scene"
 
-$(DIST)/hexapod.pnct : hexapod.blend export-meshes.py
-    $(BLENDER) --background --python export-meshes.py -- "hexapod.blend:Main" "$(DIST)/hexapod.pnct" 
+$(DIST)/tireler.pnct : burnin.blend export-meshes.py
+    $(BLENDER) --background --python export-meshes.py -- "burnin.blend:Tire" "$(DIST)/tireler.pnct" 
+
+$(DIST)/medal.pnct : burnin.blend export-meshes.py
+    $(BLENDER) --background --python export-meshes.py -- "burnin.blend:Medal" "$(DIST)/medal.pnct" 
+
+$(DIST)/meteor.pnct : burnin.blend export-meshes.py
+    $(BLENDER) --background --python export-meshes.py -- "burnin.blend:Meteor" "$(DIST)/meteor.pnct" 
+
+$(DIST)/spring.pnct : burnin.blend export-meshes.py
+    $(BLENDER) --background --python export-meshes.py -- "burnin.blend:Spring" "$(DIST)/spring.pnct" 
+
+$(DIST)/building.pnct : burnin.blend export-meshes.py
+    $(BLENDER) --background --python export-meshes.py -- "burnin.blend:Building" "$(DIST)/building.pnct" 
+
+$(DIST)/tree.pnct : burnin.blend export-meshes.py
+    $(BLENDER) --background --python export-meshes.py -- "burnin.blend:Tree" "$(DIST)/tree.pnct"

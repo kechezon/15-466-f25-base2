@@ -12,15 +12,206 @@
 
 #include <random>
 
-GLuint hexapod_meshes_for_lit_color_texture_program = 0;
-Load< MeshBuffer > hexapod_meshes(LoadTagDefault, []() -> MeshBuffer const * {
-	MeshBuffer const *ret = new MeshBuffer(data_path("hexapod.pnct"));
-	hexapod_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
+const float GROUND_LEVEL = 0;
+
+/*************************
+ * General Object Structs
+ *************************/
+struct GameObject {
+	// for reference, Tireler has a radius of 1 unit
+	Scene::Transform *transform;
+};
+
+struct ColliderCube {
+	glm::vec3<float> offset; // from a gameObject
+	std::vec3<float> dimensions;
+};
+
+struct PhysicsObject {
+	glm::vec3<float> velocity; // uses blender convention, so z is up!
+	glm::vec3<float> gravity;
+	float mass;
+};
+
+struct SquetchearAnimator {
+	// TODO: Squash-Stretch-Shear ("Squetchear") animator for Tireler.
+	// the animator puts rotation to (0, 0, 0), with z axis as up
+	// we apply z axis, then x axis, then y.
+	// then we apply squash or stretch
+	// and then we shear
+	
+	glm::quat pre_anim_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+	float verticality = 1; // 1 is the base, <1 is squash, >1 is stretch
+	float shear = 1;
+};
+
+/*************************
+ * Specific game entities
+ *************************/
+struct Player {
+	/*******************
+	 * Game Rules Logic
+	 *******************/
+	float score = 0;
+	float SCORE_GAIN = 100; // 100 points per second of driving
+	float multiplier = 1;
+	float MULTIPLIER_GAIN = 1; // adds this to multiplier every time a medal is collected
+	float COMBO_DURATION = 10; // if you don't collect a new medal in this time, the multiplier resets
+	float comboTimer = 0;
+
+	/*********************
+	 * physics components
+	 *********************/
+	// TODO: adjust values as needed
+
+	// state components
+	float health = 100;
+	bool accelerating = false;
+	bool airborne = false;
+	// timers are also used as state components
+
+	// basic movement
+	float TURN_SPEED = 45; // degrees per second. Scales with current lateral
+	float TOP_BASE_SPEED_LATERAL = 10; // units per second^2
+	float GROUND_ACCEL = 10; // units per second^2, applied while accelerating
+	float AIR_ACCEL = 1; // units per second^2, applied while accelerating
+	float FRICTION_DECEL = 5; // applied on the ground while not accelerating
+	float JUMP_STREGTH = 10; // initial jump speed, units per second
+
+	// brake boost
+	float BRAKE_DECEL = 8;
+	float CHARGE_TIME = 1;
+	float chargeTimer = 0;
+	float BOOST_POWER = 1.5f; // multiplies TOP_BASE_SPEED while boosting
+	float BOOST_TIME = 2;
+	float boostTimer = 0;
+
+	// TODO: initialize
+	GameObject *gameObject;
+	ColliderCube *collider;
+	PhysicsObject *physicsObject;
+	SquetchearAnimator *animator;
+
+	void turn(float direction) {
+		// TODO (direction = -1 or 1)
+		const glm::vec3 *old_rotation = &(gameObject->transform->rotation);
+		glm::vec3 q = glm::axis(old_rotation);
+		glm::vec3 old_angles = glm::eulerAngles(old_rotation);
+
+		glm::vec3 new_rotation;
+		// TODO: apply rotation to old_angles, and construct the new quaternion.
+	};
+
+	void accelerate() {
+		accelerating = true;
+	};
+
+	bool jump() {
+		if (airborne) return false;
+
+		physicsObject->velocity.z += JUMP_STRENGTH;
+		airborne = true;
+		return true;
+	};
+
+	void charge(float t) {
+		if (chargeTimer < CHARGE_TIME)
+			chargeTimer += t;
+	};
+
+	bool boost() {
+		if (chargeTimer >= CHARGE_TIME) {
+			// TODO: set velocity in forward direction, including jump if in the airborne
+			chargeTimer = 0;
+			return true;
+		}
+		return false;
+	};
+
+	void update(float t) {
+		glm::vec3 *position = &(gameObject->transform->position);
+		glm::vec3 *velocity = &(physicsObject->velocity);
+
+		// physics updates
+		glm::vec2 forwardNorm = glm::normalize({(*velocity).x, (*velocity).y});
+		if (airborne) {
+			*velocity += physicsObject->gravity * t;
+			// add forwardNorm * AIR_ACCEL
+		}
+		else {
+			if (accelerating) {
+				// add forwardNorm * GROUND_ACCEL
+			}
+			else {
+				// subtract forwardNorm * FRICTION_DECEL
+			}
+		}
+
+		*position += (*velocity * t);
+
+		// game logic updates
+		accelerating = false;
+
+		// animation updates
+	};
+}
+
+struct Meteor {
+	// TODO
+};
+
+struct Fire {
+	// TODO
+};
+
+struct Medal {
+	// TODO
+};
+
+struct Spring {
+	// TODO
+};
+
+struct Building {
+	// TODO
+};
+
+struct Tree {
+	// TODO
+};
+
+GLuint burning_meshes_for_lit_color_texture_program = 0;
+// Load< MeshBuffer > hexapod_meshes(LoadTagDefault, []() -> MeshBuffer const * {
+// 	MeshBuffer const *ret = new MeshBuffer(data_path("hexapod.pnct"));
+// 	hexapod_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
+// 	return ret;
+// });
+
+// Load< Scene > hexapod_scene(LoadTagDefault, []() -> Scene const * {
+// 	return new Scene(data_path("hexapod.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
+// 		Mesh const &mesh = hexapod_meshes->lookup(mesh_name);
+
+// 		scene.drawables.emplace_back(transform);
+// 		Scene::Drawable &drawable = scene.drawables.back();
+
+// 		drawable.pipeline = lit_color_texture_program_pipeline;
+
+// 		drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
+// 		drawable.pipeline.type = mesh.type;
+// 		drawable.pipeline.start = mesh.start;
+// 		drawable.pipeline.count = mesh.count;
+
+// 	});
+// });
+
+Load< MeshBuffer > burnin_meshes(LoadTagDefault, []() -> MeshBuffer const * {
+	MeshBuffer const *ret = new MeshBuffer(data_path("burnin.pnct"));
+	burning_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
 	return ret;
 });
 
-Load< Scene > hexapod_scene(LoadTagDefault, []() -> Scene const * {
-	return new Scene(data_path("hexapod.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
+Load< Scene > burnin_scene(LoadTagDefault, []() -> Scene const * {
+	return new Scene(data_path("burnin.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
 		Mesh const &mesh = hexapod_meshes->lookup(mesh_name);
 
 		scene.drawables.emplace_back(transform);
@@ -28,7 +219,7 @@ Load< Scene > hexapod_scene(LoadTagDefault, []() -> Scene const * {
 
 		drawable.pipeline = lit_color_texture_program_pipeline;
 
-		drawable.pipeline.vao = hexapod_meshes_for_lit_color_texture_program;
+		drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
 		drawable.pipeline.type = mesh.type;
 		drawable.pipeline.start = mesh.start;
 		drawable.pipeline.count = mesh.count;
@@ -40,17 +231,17 @@ Load< Scene > hexapod_scene(LoadTagDefault, []() -> Scene const * {
 PlayMode::PlayMode() : scene(*hexapod_scene) {
 	//get pointers to leg for convenience:
 	for (auto &transform : scene.transforms) {
-		if (transform.name == "Hip.FL") hip = &transform;
-		else if (transform.name == "UpperLeg.FL") upper_leg = &transform;
-		else if (transform.name == "LowerLeg.FL") lower_leg = &transform;
+	// 	if (transform.name == "Hip.FL") hip = &transform;
+	// 	else if (transform.name == "UpperLeg.FL") upper_leg = &transform;
+	// 	else if (transform.name == "LowerLeg.FL") lower_leg = &transform;
 	}
-	if (hip == nullptr) throw std::runtime_error("Hip not found.");
-	if (upper_leg == nullptr) throw std::runtime_error("Upper leg not found.");
-	if (lower_leg == nullptr) throw std::runtime_error("Lower leg not found.");
+	// if (hip == nullptr) throw std::runtime_error("Hip not found.");
+	// if (upper_leg == nullptr) throw std::runtime_error("Upper leg not found.");
+	// if (lower_leg == nullptr) throw std::runtime_error("Lower leg not found.");
 
-	hip_base_rotation = hip->rotation;
-	upper_leg_base_rotation = upper_leg->rotation;
-	lower_leg_base_rotation = lower_leg->rotation;
+	// hip_base_rotation = hip->rotation;
+	// upper_leg_base_rotation = upper_leg->rotation;
+	// lower_leg_base_rotation = lower_leg->rotation;
 
 	//get pointer to camera for convenience:
 	if (scene.cameras.size() != 1) throw std::runtime_error("Expecting scene to have exactly one camera, but it has " + std::to_string(scene.cameras.size()));
