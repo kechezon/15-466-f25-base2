@@ -1,4 +1,4 @@
-# (TODO: your game's title)
+# Rubbapocalypse
 
 Author: (TODO: your name)
 

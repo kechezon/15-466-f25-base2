@@ -163,6 +163,13 @@ struct Player {
 		return false;
 	};
 
+	void spring_jump (float strength) { // units per second
+		// TODO
+		physicsObject->velocity.z += strength;
+		airborne = true;
+		return true;
+	};
+
 	void update(float t) {
 		glm::vec3 *position = &(gameObject->transform->position);
 		glm::vec3 *velocity = &(physicsObject->velocity);
@@ -171,23 +178,24 @@ struct Player {
 		/******************
 		 * Physics Updates
 		 ******************/
-		glm::vec2 lat_vel_norm;
+		glm::vec2 latVelNorm;
 		if (!accelerating && !airborne && {(*velocity).x, (*velocity).y} != glm::vec2(0.0f)) { // decel
-			lat_vel_norm = glm::normalize({(*velocity).x, (*velocity).y});
+			latVelNorm = glm::normalize({(*velocity).x, (*velocity).y});
 			(*velocity).x -= lat_vel_norm.x * FRICTION_DECEL;
 			(*velocity).y -= lat_vel_norm.y * FRICTION_DECEL;
 		}
 
 		// clamp lateral speed
-		lat_vel_norm = glm::normalize({(*velocity).x, (*velocity).y});
-		float max_lat_speed = TOP_BASE_SPEED_LATERAL * (boostTimer <= 0 ? 1 : BOOST_POWER);
-		float final_lat_speed = physicsObject->lateralSpeed();
-		if (physicsObject->lateralSpeed() > max_lat_speed) { // bring it down to top speed if exceeding it
-			final_lat_speed = std::max(max_lat_speed, final_lat_speed - (FRICTION_DECEL * 2 * t));
+		latVelNorm = glm::normalize({(*velocity).x, (*velocity).y});
+		float maxLatSpeed = TOP_BASE_SPEED_LATERAL * (boostTimer <= 0 ? 1 : BOOST_POWER);
+		float finalLatSpeed = physicsObject->lateralSpeed();
+		if (physicsObject->lateralSpeed() > maxLatSpeed) { // bring it down to top speed if exceeding it
+			float speedDecay = (!airborne ? FRICTION_DECEL : AIR_ACCEL) * 4 * t;
+			finalLatSpeed = std::max(maxLatSpeed, finalLatSpeed - speedDecay);
 		}
-		glm::vec2 new_lat_vel = lat_vel_norm * final_lat_speed;
-		(*velocity).x = new_lat_vel.x;
-		(*velocity).y = new_lat_vel.y;
+		glm::vec2 newLatVel = latVelNorm * finalLatSpeed;
+		(*velocity).x = newLatVel.x;
+		(*velocity).y = newLatVel.y;
 
 		// Apply gravity
 		*velocity += physicsObject->gravity * t;
@@ -218,8 +226,8 @@ struct Player {
 	};
 }
 
+// TODO: Collisions
 struct Meteor {
-	// TODO
 	GameObject *gameObject;
 	ColliderBox *collider;
 	PhysicsObject *physicsObject;
@@ -238,11 +246,6 @@ struct Meteor {
 		 * Collision logic
 		 ******************/
 		// TODO: meteor->player, meteor->building, meteor->tree, meteor->ground
-
-		/*********************
-		 * Game Logic Updates
-		 *********************/
-		// TODO
 	};
 };
 
@@ -278,6 +281,22 @@ struct Fire {
 		childFlame->gameObject->position = gameObject->position + spawn_offset;
 		childFlame.spread();
 	};
+
+	void update(float t) {
+		/******************
+		 * Collision logic
+		 ******************/
+		// TODO: fire->player
+		if (burnTimer > 0) burnTimer = std::clamp(burnTimer - t, 0, BOOST_TIME);
+		else {
+			// TODO destroy self
+		}
+
+		/*********************
+		 * Game Logic Updates
+		 *********************/
+		// TODO
+	};
 };
 
 struct Medal {
@@ -305,11 +324,24 @@ struct Medal {
 struct Spring {
 	// TODO
 
+	/************
+	 * Animation
+	 ************/
+	float SHOOT_TIME
+	float SINK_TIME = 1;
+
 	/**********
 	 * Structs
 	 **********/
 	GameObject *gameObject;
 	ColliderBox *collider; // TODO
+
+	void update() {
+		/************
+		 * Animation
+		 ************/
+		gameObject->transform->rotation = glm::rotate(gameObject->transform->rotation, ROTATE_SPEED * t, {0.0f, 0.0f, 1.0f});
+	};
 };
 
 struct Building {
