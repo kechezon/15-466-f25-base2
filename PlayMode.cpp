@@ -20,18 +20,20 @@ const float GROUND_LEVEL = 0;
  *************************/
 struct GameObject {
 	// for reference, Tireler has a radius of 1 unit
+
+	// the actual object (will be reset to apply anim animations)
 	Scene::Transform *transform;
 
 	glm::vec3 transform_forward() {
-		// TODO: get forward
-		std::cout << transform->rotation.axis() << std::endl;
-		return {0,0,0};
+		std::cout << transform->rotation * {0.0f, 1.0f, 0.0f} << std::endl;
+		return transform->rotation * {0.0f, 1.0f, 0.0f};
 	};
 };
 
-struct ColliderCube {
+struct ColliderBox {
+	string tag;
 	glm::vec3<float> offset; // from a gameObject
-	std::vec3<float> dimensions;
+	glm::vec3<float> dimensions;
 };
 
 struct PhysicsObject {
@@ -51,14 +53,16 @@ struct SquetchearAnimator {
 	// then we apply squash or stretch
 	// and then we shear
 	
-	glm::quat pre_anim_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-	float verticality = 1; // 1 is the base, <1 is squash, >1 is stretch
-	float shear = 1;
+	glm::quat anim_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+	glm::vec3 anim_scale = 1; // 1 is the base, <1 is squash, >1 is stretch
+	glm::vec2 shear = {1.5, 1.5}; // TODO: figure out
 };
 
 /*************************
  * Specific game entities
  *************************/
+
+// TODO: Collisions and animations
 struct Player {
 	/*******************
 	 * Game Rules Logic
@@ -96,25 +100,23 @@ struct Player {
 	float BOOST_POWER = 1.5f; // multiplies TOP_BASE_SPEED while boosting
 	float BOOST_TIME = 2;
 	float boostTimer = 0;
+	
+	// transform pre-animation
+	glm::vec3 game_logic_position = glm::vec3(0.0f, 0.0f, 1.0f);
+	glm::quat game_logic_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+	glm::vec3 game_logic_scale = glm::vec3(1.0f, 1.0f, 1.0f);
 
-	// TODO: initialize
+	// to initialize
 	GameObject *gameObject;
-	ColliderCube *collider;
+	ColliderBox *collider;
 	PhysicsObject *physicsObject;
 	SquetchearAnimator *animator;
 
 	void turn(float direction, float t) {
-		// TODO (direction = -1 or 1)
-		const glm::vec3 *old_rotation = &(gameObject->transform->rotation);
-		glm::vec3 axis = glm::axis(old_rotation);
-		glm::vec3 angles = glm::eulerAngles(old_rotation);
-
-		glm::vec3 new_rotation;
-		float angle_delta = TURN_SPEED * direction * -1 * (physicsObject->lateralSpeed() / TOP_BASE_SPEED_LATERAL);
-		angles.z += angle_delta;
-		new_rotation = glm::angleAxis(angles, axis);
-
-		// TODO: apply rotation to old_angles, and construct the new quaternion.
+		// TODO determine which direction is positive
+		float turn_mod = chargeTimer <= 0 ? (physicsObject->lateralSpeed() / TOP_BASE_SPEED_LATERAL) : 0.5f;
+		float angle_delta = TURN_SPEED * direction * -1 * turn_mod;
+		game_logic_rotation = glm::rotate(game_logic_rotation, angle_delta, {0.0f, 0.0f, 1.0f});
 	};
 
 	void accelerate() {
@@ -134,32 +136,43 @@ struct Player {
 		return true;
 	};
 
-	void charge(float t) {
+	void charge_brake(float t) {
+		glm::vec3 *velocity = &(physicsObject->velocity);
+
+		// slow down and charge
+		if ({(*velocity).x, (*velocity).y} != glm::vec2(0.0f)) {
+			glm::vec2 lat_vel_norm = glm::normalize({(*velocity).x, (*velocity).y});
+			(*velocity).x -= lat_vel_norm.x * FRICTION_DECEL;
+			(*velocity).y -= lat_vel_norm.y * FRICTION_DECEL;
+		}
 		if (chargeTimer < CHARGE_TIME)
 			chargeTimer += t;
-	};
+	}
 
 	bool boost() {
 		glm::vec3 *rotation = &(gameObject->transform->rotation);
 		glm::vec3 *velocity = &(physicsObject->velocity);
 		if (chargeTimer >= CHARGE_TIME) {
-			// TODO: set velocity in forward direction, including jump if in the airborne
+			// set velocity in forward direction, including jump if in the airborne
 			*velocity = *rotation->forward() * TOP_BASE_SPEED_LATERAL * BOOST_POWER;
 			chargeTimer = 0;
+			boostTimer = 2;
 			return true;
 		}
+		chargeTimer = 0;
 		return false;
 	};
 
 	void update(float t) {
 		glm::vec3 *position = &(gameObject->transform->position);
 		glm::vec3 *velocity = &(physicsObject->velocity);
+		Scene::transform *transform = gameObject->transform;
 
 		/******************
 		 * Physics Updates
 		 ******************/
 		glm::vec2 lat_vel_norm;
-		if (!accelerating && !airborne) {
+		if (!accelerating && !airborne && {(*velocity).x, (*velocity).y} != glm::vec2(0.0f)) { // decel
 			lat_vel_norm = glm::normalize({(*velocity).x, (*velocity).y});
 			(*velocity).x -= lat_vel_norm.x * FRICTION_DECEL;
 			(*velocity).y -= lat_vel_norm.y * FRICTION_DECEL;
@@ -180,52 +193,139 @@ struct Player {
 		*velocity += physicsObject->gravity * t;
 
 		// Update position based on gravity
-		*position += (*velocity * t);
+		game_logic_position += (*velocity * t);
 
-
-		/*************
+		/******************
 		 * Collision logic
-		 ************/
-		// TODO
+		 ******************/
+		// TODO: player->medal, player->building, player->tree, player->ground
 
 		/*********************
 		 * Game Logic Updates
 		 *********************/
 		accelerating = false;
 		if (boostTimer > 0) boostTimer = std::clamp(boostTimer - t, 0, BOOST_TIME);
-		if (chargeTimer > 0) chargeTimer = std::clamp(chargeTimer - t, 0, CHARGE_TIME);
 		if (comboTimer > 0) comboTimer = std::clamp(comboTimer - t, 0, COMBO_DURATION);
 		score += physicsObject->lateralSpeed() * t * SCORE_GAIN * multiplier;
 
 		/********************
 		 * Animation Updates
 		 ********************/
-		// TODO
+		// TODO SquetchearAnimator
+		(*transform)->position = game_logic_position;
+		(*transform)->rotation = game_logic_rotation;
+		(*transform)->scale = game_logic_scale;
 	};
 }
 
 struct Meteor {
 	// TODO
+	GameObject *gameObject;
+	ColliderBox *collider;
+	PhysicsObject *physicsObject;
+
+	float damage_on_impact = 20f;
+
+	void update(float t) {
+		/******************
+		 * Physics updates
+		 ******************/
+		glm::vec3 *velocity = &(physicsObject->velocity);
+		*velocity += physicsObject->gravity * t;
+		gameObject->position += *velocity * t;
+
+		/******************
+		 * Collision logic
+		 ******************/
+		// TODO: meteor->player, meteor->building, meteor->tree, meteor->ground
+
+		/*********************
+		 * Game Logic Updates
+		 *********************/
+		// TODO
+	};
 };
 
 struct Fire {
 	// TODO
+
+	/*************
+	 * Base Logic
+	 *************/
+	float damagePerSecond = 13f;
+	float BURN_DURATION = 3;
+	float burnTimer = 0;
+
+	/******************
+	 * Recursion Logic
+	 ******************/
+	int spawnLevel = 0; // >0 means you can spawn more fire
+	glm::vec3 spawnDirection;
+
+	/**********
+	 * Structs
+	 **********/
+	GameObject *gameObject;
+	ColliderBox *collider;
+
+	void spread() {
+		Fire childFlame; // TODO: fire constructor (spawnLevel - 1, spawnDirection is the same)
+
+		// TODO: determine scale along spawnDirection based on ColliderBox
+		glm::vec3 spawn_offset = {spawnDirection.x * collider->dimensions.x * 0.5f,
+								  spawnDirection.y * collider->dimensions.y * 0.5f,
+								  spawnDirection.z * collider->dimensions.z * 0.5f};
+		childFlame->gameObject->position = gameObject->position + spawn_offset;
+		childFlame.spread();
+	};
 };
 
 struct Medal {
 	// TODO
+
+	/**********
+	 * Structs
+	 **********/
+	GameObject *gameObject;
+	ColliderBox *collider;
+
+	/*********************
+	 * Spinning Animation
+	 *********************/
+	float ROTATE_SPEED = pi_v / 4; // radians per second
+
+	void update() {
+		/************
+		 * Animation
+		 ************/
+		gameObject->transform->rotation = glm::rotate(gameObject->transform->rotation, ROTATE_SPEED * t, {0.0f, 0.0f, 1.0f});
+	};
 };
 
 struct Spring {
 	// TODO
+
+	/**********
+	 * Structs
+	 **********/
+	GameObject *gameObject;
+	ColliderBox *collider; // TODO
 };
 
 struct Building {
-	// TODO
+	/**********
+	 * Structs
+	 **********/
+	GameObject *gameObject;
+	ColliderBox *collider; // TODO
 };
 
 struct Tree {
-	// TODO
+	/**********
+	 * Structs
+	 **********/
+	GameObject *gameObject;
+	ColliderBox *collider; // TODO
 };
 
 GLuint burning_meshes_for_lit_color_texture_program = 0;
