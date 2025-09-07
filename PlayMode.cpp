@@ -12,8 +12,47 @@
 
 #include <random>
 #include <cmath>
+#include <numbers>
 
-const float GROUND_LEVEL = 0;
+const float GROUND_LEVEL = 0.0f;
+GLuint burning_meshes_for_lit_color_texture_program = 0;
+
+Load< MeshBuffer > burnin_meshes(LoadTagDefault, []() -> MeshBuffer const * {
+	MeshBuffer const *ret = new MeshBuffer(data_path("burnin.pnct"));
+	burning_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
+	return ret;
+});
+
+Load< Scene > burnin_scene(LoadTagDefault, []() -> Scene const * {
+	return new Scene(data_path("burnin.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
+		Mesh const &mesh = burnin_meshes->lookup(mesh_name);
+
+		scene.drawables.emplace_back(transform);
+		Scene::Drawable &drawable = scene.drawables.back();
+
+		drawable.pipeline = lit_color_texture_program_pipeline;
+
+		drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
+		drawable.pipeline.type = mesh.type;
+		drawable.pipeline.start = mesh.start;
+		drawable.pipeline.count = mesh.count;
+	});
+});
+
+Scene::Drawable new_drawable(Mesh const &mesh, Scene::Transform *tf) {
+	// TODO: fix
+	Scene::Drawable drawable = burnin_scene->drawables.back();
+	drawable.pipeline = lit_color_texture_program_pipeline;
+
+	drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
+	drawable.pipeline.type = mesh.type;
+	drawable.pipeline.start = mesh.start;
+	drawable.pipeline.count = mesh.count;
+
+	drawable.transform = tf;
+
+	return drawable;
+}
 
 /*************************
  * General Object Structs
@@ -33,17 +72,17 @@ struct GameObject {
 
 struct ColliderBox {
 	std::string tag;
-	glm::vec3<float> dimensions;
-	glm::vec3<float> offset; // from a gameObject
+	glm::vec3 dimensions;
+	glm::vec3 offset; // from a gameObject
 };
 
 struct PhysicsObject {
-	glm::vec3<float> velocity = {0, 0, 0}; // uses blender convention, so z is up!
-	glm::vec3<float> gravity = {0, 0, 0};
+	glm::vec3 velocity = {0, 0, 0}; // uses blender convention, so z is up!
+	glm::vec3 gravity = {0, 0, 0};
 	float mass = 1;
 
 	float lateralSpeed() {
-		return std::sqrtf(velocity.x * velocity.x, velocity.y * velocity.y);
+		return std::sqrtf((velocity.x * velocity.x) + (velocity.y * velocity.y));
 	};
 };
 
@@ -56,7 +95,7 @@ struct SquetchearAnimator {
 	// and then we shear
 	
 	glm::quat anim_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-	glm::vec3 anim_scale = 1; // 1 is the base, <1 is squash, >1 is stretch
+	glm::vec3 anim_scale = {1, 1, 1}; // 1 is the base, <1 is squash, >1 is stretch
 	glm::vec2 shear = {1.5, 1.5}; // TODO: figure out
 };
 
@@ -68,8 +107,8 @@ struct SquetchearAnimator {
 struct Player {
 	// to initialize
 	GameObject *gameObject;
-	ColliderBox *collider = &{"player", {1, 2, 2}, {0, 0, 0}};
-	PhysicsObject *physicsObject = &{{0, 0, 0}, {0, 0, -9.81f}, 1};
+	ColliderBox *collider = new ColliderBox{"player", {1, 2, 2}, {0, 0, 0}};
+	PhysicsObject *physicsObject = new PhysicsObject{{0, 0, 0}, {0, 0, -9.81f}, 1};
 	SquetchearAnimator *animator = nullptr; // TODO
 
 	/*******************
@@ -94,12 +133,12 @@ struct Player {
 	// timers are also used as state components
 
 	// basic movement
-	float TURN_SPEED = 8 * pi_v; // radians per second. Scales with current lateral
+	float TURN_SPEED = 8 * std::numbers::pi_v<float>; // radians per second. Scales with current lateral
 	float TOP_BASE_SPEED_LATERAL = 10; // units per second^2
 	float GROUND_ACCEL = 10; // units per second^2, applied while accelerating
 	float AIR_ACCEL = 1; // units per second^2, applied while accelerating
 	float FRICTION_DECEL = 5; // applied on the ground while not accelerating
-	float JUMP_STREGTH = 10; // initial jump speed, units per second
+	float JUMP_STRENGTH = 10; // initial jump speed, units per second
 
 	// brake boost
 	float BRAKE_DECEL = 8;
@@ -117,11 +156,11 @@ struct Player {
 	glm::quat game_logic_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 	glm::vec3 game_logic_scale = glm::vec3(1.0f, 1.0f, 1.0f);
 	glm::vec3 game_logic_transform_forward() {
-		std::cout << game_logic_rotation * {0.0f, 1.0f, 0.0f} << std::endl;
-		return game_logic_rotation * {0.0f, 1.0f, 0.0f};
+		// std::cout << game_logic_rotation * glm::vec3(0.0f, 1.0f, 0.0f) << std::endl;
+		return game_logic_rotation * glm::vec3(0.0f, 1.0f, 0.0f);
 	};
 
-	Player(GameObject &obj) {
+	Player(GameObject *obj) {
 		gameObject = obj;
 	};
 
@@ -136,10 +175,9 @@ struct Player {
 		// if (physicsObject->lateralSpeed() > TOP_BASE_SPEED_LATERAL * (boostTimer > 0 ? BOOST_POWER : 1))
 		// 	return false;
 		
-		glm::vec3 *rotation = &(gameObject->transform->rotation);
 		glm::vec3 *velocity = &(physicsObject->velocity);
 
-		*velocity += (physicsObject->gravity +  (rotation->forward * (!airborne ? GROUND_ACCEL : AIR_ACCEL))) * t;
+		*velocity += (physicsObject->gravity +  (game_logic_transform_forward() * (!airborne ? GROUND_ACCEL : AIR_ACCEL))) * t;
 		accelerating = true;
 	};
 
@@ -155,21 +193,25 @@ struct Player {
 		glm::vec3 *velocity = &(physicsObject->velocity);
 
 		// slow down and charge
-		if ({(*velocity).x, (*velocity).y} != glm::vec2(0.0f)) {
-			glm::vec2 lat_vel_norm = glm::normalize({(*velocity).x, (*velocity).y});
-			(*velocity).x -= lat_vel_norm.x * FRICTION_DECEL;
-			(*velocity).y -= lat_vel_norm.y * FRICTION_DECEL;
+		if (glm::vec2((*velocity).x, (*velocity).y) != glm::vec2(0.0f)) {
+			glm::vec2 oldLatVel = {(*velocity).x, (*velocity).y};
+
+			glm::vec2 latVelNorm = glm::normalize(glm::vec2((*velocity).x, (*velocity).y));
+
+			(*velocity).x -= latVelNorm.x * FRICTION_DECEL;
+			if ((*velocity).x)
+
+			(*velocity).y -= latVelNorm.y * FRICTION_DECEL;
 		}
 		if (chargeTimer < CHARGE_TIME)
 			chargeTimer += t;
 	}
 
 	bool boost() {
-		glm::vec3 *rotation = &(gameObject->transform->rotation);
 		glm::vec3 *velocity = &(physicsObject->velocity);
 		if (chargeTimer >= CHARGE_TIME) {
 			// set velocity in forward direction, including jump if in the airborne
-			*velocity = *rotation->forward() * TOP_BASE_SPEED_LATERAL * BOOST_POWER;
+			*velocity = game_logic_transform_forward() * TOP_BASE_SPEED_LATERAL * BOOST_POWER;
 			chargeTimer = 0;
 			boostTimer = 2;
 			return true;
@@ -188,22 +230,21 @@ struct Player {
 	};
 
 	void update(float t) {
-		glm::vec3 *position = &(gameObject->transform->position);
 		glm::vec3 *velocity = &(physicsObject->velocity);
-		Scene::transform *transform = gameObject->transform;
+		Scene::Transform *transform = gameObject->transform;
 
 		/******************
 		 * Physics Updates
 		 ******************/
 		glm::vec2 latVelNorm;
-		if (!accelerating && !airborne && {(*velocity).x, (*velocity).y} != glm::vec2(0.0f)) { // decel
-			latVelNorm = glm::normalize({(*velocity).x, (*velocity).y});
-			(*velocity).x -= lat_vel_norm.x * FRICTION_DECEL;
-			(*velocity).y -= lat_vel_norm.y * FRICTION_DECEL;
+		if (!accelerating && !airborne && glm::vec2((*velocity).x, (*velocity).y) != glm::vec2(0.0f)) { // decel
+			latVelNorm = glm::normalize(glm::vec2((*velocity).x, (*velocity).y));
+			(*velocity).x -= latVelNorm.x * FRICTION_DECEL;
+			(*velocity).y -= latVelNorm.y * FRICTION_DECEL;
 		}
 
 		// clamp lateral speed
-		latVelNorm = glm::normalize({(*velocity).x, (*velocity).y});
+		latVelNorm = glm::normalize(glm::vec2((*velocity).x, (*velocity).y));
 		float maxLatSpeed = TOP_BASE_SPEED_LATERAL * (boostTimer <= 0 ? 1 : BOOST_POWER);
 		float finalLatSpeed = physicsObject->lateralSpeed();
 		if (physicsObject->lateralSpeed() > maxLatSpeed) { // bring it down to top speed if exceeding it
@@ -229,29 +270,30 @@ struct Player {
 		 * Game Logic Updates
 		 *********************/
 		accelerating = false;
-		if (boostTimer > 0) boostTimer = std::clamp(boostTimer - t, 0, BOOST_TIME);
-		if (comboTimer > 0) comboTimer = std::clamp(comboTimer - t, 0, COMBO_DURATION);
+		if (boostTimer > 0) boostTimer = std::clamp(boostTimer - t, 0.0f, BOOST_TIME);
+		if (comboTimer > 0) comboTimer = std::clamp(comboTimer - t, 0.0f, COMBO_DURATION);
 		score += physicsObject->lateralSpeed() * t * SCORE_GAIN * multiplier;
 
 		/********************
 		 * Animation Updates
 		 ********************/
 		// TODO SquetchearAnimator
-		(*transform)->position = game_logic_position;
-		(*transform)->rotation = game_logic_rotation;
-		(*transform)->scale = game_logic_scale;
+		(*transform).position = game_logic_position;
+		(*transform).rotation = game_logic_rotation;
+		(*transform).scale = game_logic_scale;
 	};
-}
+};
 
 // TODO: Collisions
 struct Meteor {
 	GameObject *gameObject;
-	ColliderBox *collider = &{"meteor", {3.6f, 3.6f, 3.6f}, {0, 0, 0}};
-	PhysicsObject *physicsObject; // TODO
+	ColliderBox *collider = new ColliderBox{"meteor", {3.6f, 3.6f, 3.6f}, {0, 0, 0}};
+	PhysicsObject *physicsObject = new PhysicsObject{{0, 0, -50}}; // TODO
 
-	float damage_on_impact = 20f;
+	float DAMAGE_ON_IMPACT = 20;
+	float SPEED = 50;
 
-	Meteor(GameObject &obj){
+	Meteor(GameObject *obj = nullptr){
 		gameObject = obj;
 	};
 
@@ -261,7 +303,7 @@ struct Meteor {
 		 ******************/
 		glm::vec3 *velocity = &(physicsObject->velocity);
 		*velocity += physicsObject->gravity * t;
-		gameObject->position += *velocity * t;
+		(*(gameObject->transform)).position += (*velocity) * t;
 
 		/******************
 		 * Collision logic
@@ -269,7 +311,6 @@ struct Meteor {
 		// TODO: meteor->player, meteor->building, meteor->tree, meteor->ground
 	};
 };
-Meteor meteorPrefab;
 
 struct Flame {
 	// TODO
@@ -278,34 +319,40 @@ struct Flame {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = &{"flame", {2, 2, 2}, {0, 0, 0}};; // TODO
+	ColliderBox *collider = new ColliderBox{"flame", {2, 2, 2}, {0, 0, 0}};; // TODO
 
 	/*************
 	 * Base Logic
 	 *************/
-	float damagePerSecond = 13f;
-	float BURN_DURATION = 3;
-	float burnTimer = 0;
+	float damagePerSecond = 13.0f;
+	float BURN_DURATION = 3.0f;
+	float burnTimer = 0.0f;
 
 	/******************
 	 * Recursion Logic
 	 ******************/
 	int spawnLevel = 0; // >0 means you can spawn more fire
-	glm::vec3<float> spawnDirection;
+	glm::vec3 spawnDirection;
 
-	Flame(GameObject &obj) {
+	Flame(GameObject *obj = nullptr, int level = 0, glm::vec3 dir = glm::vec3(0.0f)) {
 		gameObject = obj;
+		spawnLevel = level;
+		spawnDirection = dir != glm::vec3(0.0f) ? glm::normalize(dir) : glm::vec3(0.0f);
 	};
 
 	void spread() {
-		Flame childFlame; // TODO: fire constructor (spawnLevel - 1, spawnDirection is the same)
-
-		// TODO: determine scale along spawnDirection based on ColliderBox
-		glm::vec3<float> spawnOffset = {spawnDirection.x * collider->dimensions.x * 0.5f,
-								  spawnDirection.y * collider->dimensions.y * 0.5f,
-								  spawnDirection.z * collider->dimensions.z * 0.5f};
-		childFlame->gameObject->position = gameObject->position + spawnOffset;
-		childFlame.spread();
+		if (spawnLevel > 0) {
+			glm::vec3 spawnOffset = {spawnDirection.x * collider->dimensions.x * 0.5f,
+									spawnDirection.y * collider->dimensions.y * 0.5f,
+									spawnDirection.z * collider->dimensions.z * 0.5f};
+			Scene::Transform *tf = new Scene::Transform();
+			tf->name = "flame";
+			tf->position = spawnOffset;
+			Scene::Drawable dr = (new_drawable(burnin_meshes->lookup("Flame"), tf));
+			
+			Flame *childFlame = new Flame{new GameObject{tf, dr}, spawnLevel - 1, spawnDirection};
+			childFlame->spread();
+		}
 	};
 
 	void update(float t) {
@@ -313,18 +360,20 @@ struct Flame {
 		 * Collision logic
 		 ******************/
 		// TODO: fire->player
-		if (burnTimer > 0) burnTimer = std::clamp(burnTimer - t, 0, BOOST_TIME);
-		else {
-			// TODO destroy self
-		}
 
 		/*********************
 		 * Game Logic Updates
 		 *********************/
+		if (burnTimer > 0)
+			burnTimer = std::clamp(burnTimer - t, 0.0f, BURN_DURATION);
+		else {
+			// TODO destroy self
+			free(gameObject);
+			free(collider);
+		}
 		// TODO
 	};
 };
-Flame flamePrefab;
 
 struct Medal {
 	// TODO
@@ -333,18 +382,18 @@ struct Medal {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = &{"medal", {1.2f, 1.2f, 1.2f}, {0, 0, 0}};; // TODO
+	ColliderBox *collider = new ColliderBox{"medal", {1.2f, 1.2f, 1.2f}, {0, 0, 0}};; // TODO
 
 	/*********************
 	 * Spinning Animation
 	 *********************/
-	float ROTATE_SPEED = pi_v / 4; // radians per second
+	float ROTATE_SPEED = std::numbers::pi_v<float> / 4; // radians per second
 
-	Medal(GameObject &obj) {
+	Medal(GameObject *obj = nullptr) {
 		gameObject = obj;
 	};
 
-	void update() {
+	void update(float t) {
 		/************
 		 * Animation
 		 ************/
@@ -359,17 +408,17 @@ struct Spring {
 	 * Animation
 	 ************/
 	float SHOOT_TIME = 0.1f;
-	float SINK_TIME = 0.9;
-	float shootTimer = 0;
+	float SINK_TIME = 0.9f;
+	float shootTimer = 0.0f;
 	float sinkTimer = 0.0f;
 
 	/**********
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = &{"spring", {2, 2, 1.6f}, {0, 0, 0}};; // TODO
+	ColliderBox *collider = new ColliderBox{"spring", {2, 2, 1.6f}, {0, 0, 0}}; // TODO
 
-	Spring(GameObject &obj) {
+	Spring(GameObject *obj = nullptr) {
 		gameObject = obj;
 	};
 
@@ -380,33 +429,30 @@ struct Spring {
 		// TODO
 	};
 };
-Spring springPrefab;
 
 struct Building {
 	/**********
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = &{"building", {4, 4, 4}, {0, 0, 0}};; // TODO
+	ColliderBox *collider = new ColliderBox{"building", {4, 4, 4}, {0, 0, 0}};; // TODO
 
-	Building(GameObject* bp) {
-		buildingPieces = bp;
+	Building(GameObject *bp = nullptr) {
+		gameObject = bp;
 	};
 };
-Building buildingPrefab;
 
 struct Tree {
 	/**********
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = &{"tree", {2, 2, 6}, {0, 0, 0}};; // TODO
+	ColliderBox *collider = new ColliderBox{"tree", {2, 2, 6}, {0, 0, 0}};; // TODO
 
-	Tree(GameObject &obj) {
+	Tree(GameObject *obj = nullptr) {
 		gameObject = obj;
 	};
 };
-Tree treePrefab;
 
 struct Ground {
 	/**********
@@ -415,18 +461,17 @@ struct Ground {
 	GameObject *gameObject;
 	ColliderBox *collider; // TODO
 
-	Ground(GameObject &obj) {
+	Ground(GameObject *obj = nullptr) {
 		gameObject = obj;
 	};
 };
-Ground *ground;
 
-GLuint burning_meshes_for_lit_color_texture_program = 0;
+
+
 /***************
  * Game Objects
  ***************/
-// Ground
-Ground ground({nullptr});
+Ground *ground = new Ground();
 
 // Buildings, Trees, and Springs (fixed in the world)
 std::array<Building, 6> buildings;
@@ -464,48 +509,14 @@ Player player({nullptr});
 // 	});
 // });
 
-Load< MeshBuffer > burnin_meshes(LoadTagDefault, []() -> MeshBuffer const * {
-	MeshBuffer const *ret = new MeshBuffer(data_path("burnin.pnct"));
-	burning_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
-	return ret;
-});
-
-Load< Scene > burnin_scene(LoadTagDefault, []() -> Scene const * {
-	return new Scene(data_path("burnin.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
-		Mesh const &mesh = burnin_meshes->lookup(mesh_name);
-
-		scene.drawables.emplace_back(transform);
-		Scene::Drawable &drawable = scene.drawables.back();
-
-		drawable.pipeline = lit_color_texture_program_pipeline;
-
-		drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
-		drawable.pipeline.type = mesh.type;
-		drawable.pipeline.start = mesh.start;
-		drawable.pipeline.count = mesh.count;
-	});
-});
-
-&Scene::Drawable new_drawable(Mesh const &mesh) {
-	Scene::Drawable &drawable = burnin_scene->drawables.back();
-	drawable.pipeline = lit_color_texture_program_pipeline;
-
-	drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
-	drawable.pipeline.type = mesh.type;
-	drawable.pipeline.start = mesh.start;
-	drawable.pipeline.count = mesh.count;
-
-	return drawable;
-}
-
 // Makes a copy of a scene, in case you want to modify it.
 PlayMode::PlayMode() : scene(*burnin_scene) {
 	//get pointers to leg for convenience:
-	for (auto &transform : scene.transforms) {
-	// 	if (transform.name == "Hip.FL") hip = &transform;
-	// 	else if (transform.name == "UpperLeg.FL") upper_leg = &transform;
-	// 	else if (transform.name == "LowerLeg.FL") lower_leg = &transform;
-	}
+	// for (auto &transform : scene.transforms) {
+	// // 	if (transform.name == "Hip.FL") hip = &transform;
+	// // 	else if (transform.name == "UpperLeg.FL") upper_leg = &transform;
+	// // 	else if (transform.name == "LowerLeg.FL") lower_leg = &transform;
+	// }
 	// if (hip == nullptr) throw std::runtime_error("Hip not found.");
 	// if (upper_leg == nullptr) throw std::runtime_error("Upper leg not found.");
 	// if (lower_leg == nullptr) throw std::runtime_error("Lower leg not found.");
@@ -519,66 +530,69 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 	 * (player, ground, and Medal don't need prefabs
 	 *  since there's only one of each on field at a time)
 	 ******************************************************/
-	for (auto &transform : scene.transforms) {
-		switch (transform.name) {
-			// case "Player":
-			// 	break;
-			case "Meteor":
-				meteorPrefab = {&{&transform}};
-				break;
-			case "Building":
-				buildingPrefab = {&{&transform}};
-				break;
-			case "Spring":
-				springPrefab = {&{&transform}};
-				break;
-			case "Flame":
-				flamePrefab = {&{&transform}};
-				break;
-			case "Tree":
-				treePrefab = {&{&transform}};
-				break;
-			default:
-				break;
-		}
-	}
+	// for (auto &transform : scene.transforms) {
+	// 	Scene::Transform *new_transform = new Scene::Transform();
+	// 	new_transform->position = transform.position;
+	// 	new_transform->rotation = transform.rotation;
+	// 	new_transform->scale = transform.scale;
+
+	// 	// if (transform.name == "Player")
+	// 	if (transform.name == "Meteor") meteorPrefab = {new GameObject{new_transform}};
+	// 	if (transform.name == "Building") buildingPrefab = {new GameObject{new_transform}};
+	// 	if (transform.name == "Spring") springPrefab = {new GameObject{new_transform}};
+	// 	if (transform.name == "Flame") flamePrefab = {new GameObject{new_transform}};
+	// 	if (transform.name == "Tree") treePrefab = {new GameObject{new_transform}};
+	// 	if (transform.name == "Ground") ground.gameObject = {new_transform};
+	// }
 
 	/*************************************
-	 * 2) Set locations for fixed objects
+	 * 1) Set locations for fixed objects
 	 *************************************/
 	// Buildings
 	{
 		// see og design doc for reference
 
 		// bottom right
-		Scene::Transform *tf0 = &{"building0", {-6f, -10f, 2f}};
-		Scene::Drawable &dr0 = new_drawable(burnin_meshes->lookup("Building"));
-		buildings[0] = {&{tf0, dr0}};
+		Scene::Transform *tf0 = new Scene::Transform();
+		tf0->name = "building0";
+		tf0->position = {-6.0f, -10.0f, 2.0f};
+		Scene::Drawable dr0 = new_drawable(burnin_meshes->lookup("Building"), tf0);
+		buildings[0] = {new GameObject{tf0, dr0}};
 
 		// bottom left
-		Scene::Transform *tf1 = &{"building1", {-10f, -10f, 2f}};
-		Scene::Drawable &dr1 = new_drawable(burnin_meshes->lookup("Building"));
-		buildings[1] = {&{tf1, dr1}};
+		Scene::Transform *tf1 = new Scene::Transform();
+		tf1->name = "building1";
+		tf1->position = {-10.0f, -10.0f, 2.0f};
+		Scene::Drawable dr1 = new_drawable(burnin_meshes->lookup("Building"), tf1);
+		buildings[1] = {new GameObject{tf1, dr1}};
 
 		// middle left down
-		Scene::Transform *tf2 = &{"building2", {-14f, -2f, 2f}};
-		Scene::Drawable &dr2 = new_drawable(burnin_meshes->lookup("Building"));
-		buildings[2] = {&{tf2, dr2}};
+		Scene::Transform *tf2 = new Scene::Transform();
+		tf2->name = "building2";
+		tf2->position = {-14.0f, -2.0f, 2.0f};
+		Scene::Drawable dr2 = new_drawable(burnin_meshes->lookup("Building"), tf2);
+		buildings[2] = {new GameObject{tf2, dr2}};
 
 		// middle left up
-		Scene::Transform *tf3 = &{"building3", {-14f, 2f, 2f}};
-		Scene::Drawable &dr3 = new_drawable(burnin_meshes->lookup("Building"));
-		buildings[3] = {&{tf3, dr3}};
+		Scene::Transform *tf3 = new Scene::Transform();
+		tf3->name = "building3";
+		tf3->position = {-14.0f, 2.0f, 2.0f};
+		Scene::Drawable dr3 = new_drawable(burnin_meshes->lookup("Building"), tf3);
+		buildings[3] = {new GameObject{tf3, dr3}};
 
 		// top right (ground floor)
-		Scene::Transform *tf4 = &{"building4", {-6, 2f, 2f}};
-		Scene::Drawable &dr4 = new_drawable(burnin_meshes->lookup("Building"));
-		buildings[3] = {&{tf4, dr4}};
+		Scene::Transform *tf4 = new Scene::Transform();
+		tf4->name = "building4";
+		tf4->position = {-6.0f, 2.0f, 2.0f};
+		Scene::Drawable dr4 = new_drawable(burnin_meshes->lookup("Building"), tf4);
+		buildings[4] = {new GameObject{tf4, dr4}};
 
 		// top right (upper floor floor)
-		Scene::Transform *tf5 = &{"building5", {-6, 2f, 6f}};
-		Scene::Drawable &dr5 = new_drawable(burnin_meshes->lookup("Building"));
-		buildings[3] = {&{tf5, dr5}};
+		Scene::Transform *tf5 = new Scene::Transform();
+		tf5->name = "building5";
+		tf5->position = {-6.0f, 2.0f, 6.0f};
+		Scene::Drawable dr5 = new_drawable(burnin_meshes->lookup("Building"), tf5);
+		buildings[5] = {new GameObject{tf5, dr5}};
 	}
 
 	// Trees
