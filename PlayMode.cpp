@@ -40,7 +40,6 @@ Load< Scene > burnin_scene(LoadTagDefault, []() -> Scene const * {
 });
 
 Scene::Drawable new_drawable(Mesh const &mesh, Scene::Transform *tf) {
-	// TODO: fix
 	Scene::Drawable drawable = burnin_scene->drawables.back();
 	drawable.pipeline = lit_color_texture_program_pipeline;
 
@@ -74,6 +73,35 @@ struct ColliderBox {
 	std::string tag;
 	glm::vec3 dimensions;
 	glm::vec3 offset; // from a gameObject
+
+	bool collider_test(GameObject myObj, GameObject otherObj, ColliderBox other) {
+		glm::vec3 myPosition = myObj->transform->position;
+		glm::vec3 otherPosition = otherObj->transform->position;
+
+		// TODO: test each corner of this box against the bounds of the other box
+
+		// for (int myIdx = 0; myIdx < 3; myIdx++) {
+		// 	// glm::vec3 toMyBorder0 = glm::vec3(0.0f);
+		// 	// toBorderMe0[myIdx] = myPosition[myIdx] + (dimensions[myIdx] / 2) + offset[myIdx];
+		// 	// toBorderMe0 = myObj->transform->rotation * toBorderMe0;
+
+		// 	// glm::vec3 toBorderMe1 = glm::vec3(0.0f);
+		// 	// toBorderMe1[myIdx] = myPosition[myIdx] - (dimensions[myIdx] / 2) + offset[myIdx];
+		// 	// toBorderMe1 = myObj->transform->rotation * toBorderMe1;
+
+		// 	for (int otherIdx = 0; otherIdx < 3; otherIdx++) {
+		// 		glm::vec3 toBorderOther0 = glm::vec3(0.0f);
+		// 		toBorderOther0[otherIdx] = myPosition[otherIdx] + (dimensions[otherIdx] / 2) + offset[otherIdx];
+		// 		toBorderOther0 = otherObj->transform->rotation * toBorderOther0;
+
+		// 		glm::vec3 toBorderOther1 = glm::vec3(0.0f);
+		// 		toBorderOther1[otherIdx] = myPosition[otherIdx] - (dimensions[otherIdx] / 2) + offset[otherIdx];
+		// 		toBorderOther1 = otherObj->transform->rotation * toBorderOther1;
+		// 	}
+		// }
+
+		return false;
+	};
 };
 
 struct PhysicsObject {
@@ -382,7 +410,7 @@ struct Medal {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = new ColliderBox{"medal", {1.2f, 1.2f, 1.2f}, {0, 0, 0}};; // TODO
+	ColliderBox *collider = new ColliderBox{"medal", {1.8f, 1.8f, 1.8f}, {0, 0, 0}};; // TODO
 
 	/*********************
 	 * Spinning Animation
@@ -416,7 +444,7 @@ struct Spring {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = new ColliderBox{"spring", {2, 2, 1.6f}, {0, 0, 0}}; // TODO
+	ColliderBox *collider = new ColliderBox{"spring", {3, 3, 2.4f}, {0, 0, 0}}; // TODO
 
 	Spring(GameObject *obj = nullptr) {
 		gameObject = obj;
@@ -447,7 +475,7 @@ struct Tree {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = new ColliderBox{"tree", {2, 2, 6}, {0, 0, 0}};; // TODO
+	ColliderBox *collider = new ColliderBox{"tree", {3, 3, 9}, {0, 0, 0}};; // TODO
 
 	Tree(GameObject *obj = nullptr) {
 		gameObject = obj;
@@ -525,28 +553,8 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 	// upper_leg_base_rotation = upper_leg->rotation;
 	// lower_leg_base_rotation = lower_leg->rotation;
 
-	/******************************************************
-	 * 1) Get transforms to prefabs
-	 * (player, ground, and Medal don't need prefabs
-	 *  since there's only one of each on field at a time)
-	 ******************************************************/
-	// for (auto &transform : scene.transforms) {
-	// 	Scene::Transform *new_transform = new Scene::Transform();
-	// 	new_transform->position = transform.position;
-	// 	new_transform->rotation = transform.rotation;
-	// 	new_transform->scale = transform.scale;
-
-	// 	// if (transform.name == "Player")
-	// 	if (transform.name == "Meteor") meteorPrefab = {new GameObject{new_transform}};
-	// 	if (transform.name == "Building") buildingPrefab = {new GameObject{new_transform}};
-	// 	if (transform.name == "Spring") springPrefab = {new GameObject{new_transform}};
-	// 	if (transform.name == "Flame") flamePrefab = {new GameObject{new_transform}};
-	// 	if (transform.name == "Tree") treePrefab = {new GameObject{new_transform}};
-	// 	if (transform.name == "Ground") ground.gameObject = {new_transform};
-	// }
-
 	/*************************************
-	 * 1) Set locations for fixed objects
+	 * Set locations for fixed objects
 	 *************************************/
 	// Buildings
 	{
@@ -555,42 +563,42 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 		// bottom right
 		Scene::Transform *tf0 = new Scene::Transform();
 		tf0->name = "building0";
-		tf0->position = {-6.0f, -10.0f, 2.0f};
+		tf0->position = {-12.0f, -20.0f, 4.0f};
 		Scene::Drawable dr0 = new_drawable(burnin_meshes->lookup("Building"), tf0);
 		buildings[0] = {new GameObject{tf0, dr0}};
 
 		// bottom left
 		Scene::Transform *tf1 = new Scene::Transform();
 		tf1->name = "building1";
-		tf1->position = {-10.0f, -10.0f, 2.0f};
+		tf1->position = {-20.0f, -20.0f, 4.0f};
 		Scene::Drawable dr1 = new_drawable(burnin_meshes->lookup("Building"), tf1);
 		buildings[1] = {new GameObject{tf1, dr1}};
 
 		// middle left down
 		Scene::Transform *tf2 = new Scene::Transform();
 		tf2->name = "building2";
-		tf2->position = {-14.0f, -2.0f, 2.0f};
+		tf2->position = {-28.0f, -4.0f, 4.0f};
 		Scene::Drawable dr2 = new_drawable(burnin_meshes->lookup("Building"), tf2);
 		buildings[2] = {new GameObject{tf2, dr2}};
 
 		// middle left up
 		Scene::Transform *tf3 = new Scene::Transform();
 		tf3->name = "building3";
-		tf3->position = {-14.0f, 2.0f, 2.0f};
+		tf3->position = {-28.0f, 4.0f, 4.0f};
 		Scene::Drawable dr3 = new_drawable(burnin_meshes->lookup("Building"), tf3);
 		buildings[3] = {new GameObject{tf3, dr3}};
 
 		// top right (ground floor)
 		Scene::Transform *tf4 = new Scene::Transform();
 		tf4->name = "building4";
-		tf4->position = {-6.0f, 2.0f, 2.0f};
+		tf4->position = {-12.0f, 4.0f, 4.0f};
 		Scene::Drawable dr4 = new_drawable(burnin_meshes->lookup("Building"), tf4);
 		buildings[4] = {new GameObject{tf4, dr4}};
 
 		// top right (upper floor floor)
 		Scene::Transform *tf5 = new Scene::Transform();
 		tf5->name = "building5";
-		tf5->position = {-6.0f, 2.0f, 6.0f};
+		tf5->position = {-12.0f, 4.0f, 12.0f};
 		Scene::Drawable dr5 = new_drawable(burnin_meshes->lookup("Building"), tf5);
 		buildings[5] = {new GameObject{tf5, dr5}};
 	}
