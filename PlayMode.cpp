@@ -19,33 +19,35 @@ const float GROUND_LEVEL = 0;
  * General Object Structs
  *************************/
 struct GameObject {
-	// for reference, Tireler has a radius of 1 unit
+	// for reference, Tireler has a radius of 1 unit, and a width of 1 unit
 
 	// the actual object (will be reset to apply anim animations)
 	Scene::Transform *transform;
+	Scene::Drawable &drawable;
 
 	glm::vec3 transform_forward() {
-		std::cout << transform->rotation * {0.0f, 1.0f, 0.0f} << std::endl;
-		return transform->rotation * {0.0f, 1.0f, 0.0f};
+		// std::cout << (transform->rotation * glm::vec3(0.0f, 1.0f, 0.0f)) << std::endl;
+		return transform->rotation * glm::vec3(0.0f, 1.0f, 0.0f);
 	};
 };
 
 struct ColliderBox {
-	string tag;
-	glm::vec3<float> offset; // from a gameObject
+	std::string tag;
 	glm::vec3<float> dimensions;
+	glm::vec3<float> offset; // from a gameObject
 };
 
 struct PhysicsObject {
-	glm::vec3<float> velocity; // uses blender convention, so z is up!
-	glm::vec3<float> gravity;
-	float mass;
+	glm::vec3<float> velocity = {0, 0, 0}; // uses blender convention, so z is up!
+	glm::vec3<float> gravity = {0, 0, 0};
+	float mass = 1;
 
 	float lateralSpeed() {
 		return std::sqrtf(velocity.x * velocity.x, velocity.y * velocity.y);
 	};
 };
 
+// TODO: Squetchear Functions
 struct SquetchearAnimator {
 	// TODO: Squash-Stretch-Shear ("Squetchear") animator for Tireler.
 	// the animator puts rotation to (0, 0, 0), with z axis as up
@@ -64,6 +66,12 @@ struct SquetchearAnimator {
 
 // TODO: Collisions and animations
 struct Player {
+	// to initialize
+	GameObject *gameObject;
+	ColliderBox *collider = &{"player", {1, 2, 2}, {0, 0, 0}};
+	PhysicsObject *physicsObject = &{{0, 0, 0}, {0, 0, -9.81f}, 1};
+	SquetchearAnimator *animator = nullptr; // TODO
+
 	/*******************
 	 * Game Rules Logic
 	 *******************/
@@ -100,17 +108,22 @@ struct Player {
 	float BOOST_POWER = 1.5f; // multiplies TOP_BASE_SPEED while boosting
 	float BOOST_TIME = 2;
 	float boostTimer = 0;
+
+	// spring interactions
+	ColliderBox *lastSpring;
 	
 	// transform pre-animation
 	glm::vec3 game_logic_position = glm::vec3(0.0f, 0.0f, 1.0f);
 	glm::quat game_logic_rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 	glm::vec3 game_logic_scale = glm::vec3(1.0f, 1.0f, 1.0f);
+	glm::vec3 game_logic_transform_forward() {
+		std::cout << game_logic_rotation * {0.0f, 1.0f, 0.0f} << std::endl;
+		return game_logic_rotation * {0.0f, 1.0f, 0.0f};
+	};
 
-	// to initialize
-	GameObject *gameObject;
-	ColliderBox *collider;
-	PhysicsObject *physicsObject;
-	SquetchearAnimator *animator;
+	Player(GameObject &obj) {
+		gameObject = obj;
+	};
 
 	void turn(float direction, float t) {
 		// TODO determine which direction is positive
@@ -119,12 +132,14 @@ struct Player {
 		game_logic_rotation = glm::rotate(game_logic_rotation, angle_delta, {0.0f, 0.0f, 1.0f});
 	};
 
-	void accelerate() {
+	void accelerate(float t) {
+		// if (physicsObject->lateralSpeed() > TOP_BASE_SPEED_LATERAL * (boostTimer > 0 ? BOOST_POWER : 1))
+		// 	return false;
+		
 		glm::vec3 *rotation = &(gameObject->transform->rotation);
 		glm::vec3 *velocity = &(physicsObject->velocity);
 
 		*velocity += (physicsObject->gravity +  (rotation->forward * (!airborne ? GROUND_ACCEL : AIR_ACCEL))) * t;
-
 		accelerating = true;
 	};
 
@@ -163,10 +178,12 @@ struct Player {
 		return false;
 	};
 
-	void spring_jump (float strength) { // units per second
+	bool spring_jump (ColliderBox *springBox, float strength) { // units per second
 		// TODO
+		if (springBox == lastSpring) return false;
 		physicsObject->velocity.z += strength;
 		airborne = true;
+		lastSpring = springBox;
 		return true;
 	};
 
@@ -229,10 +246,14 @@ struct Player {
 // TODO: Collisions
 struct Meteor {
 	GameObject *gameObject;
-	ColliderBox *collider;
-	PhysicsObject *physicsObject;
+	ColliderBox *collider = &{"meteor", {3.6f, 3.6f, 3.6f}, {0, 0, 0}};
+	PhysicsObject *physicsObject; // TODO
 
 	float damage_on_impact = 20f;
+
+	Meteor(GameObject &obj){
+		gameObject = obj;
+	};
 
 	void update(float t) {
 		/******************
@@ -248,9 +269,16 @@ struct Meteor {
 		// TODO: meteor->player, meteor->building, meteor->tree, meteor->ground
 	};
 };
+Meteor meteorPrefab;
 
-struct Fire {
+struct Flame {
 	// TODO
+
+	/**********
+	 * Structs
+	 **********/
+	GameObject *gameObject;
+	ColliderBox *collider = &{"flame", {2, 2, 2}, {0, 0, 0}};; // TODO
 
 	/*************
 	 * Base Logic
@@ -263,22 +291,20 @@ struct Fire {
 	 * Recursion Logic
 	 ******************/
 	int spawnLevel = 0; // >0 means you can spawn more fire
-	glm::vec3 spawnDirection;
+	glm::vec3<float> spawnDirection;
 
-	/**********
-	 * Structs
-	 **********/
-	GameObject *gameObject;
-	ColliderBox *collider;
+	Flame(GameObject &obj) {
+		gameObject = obj;
+	};
 
 	void spread() {
-		Fire childFlame; // TODO: fire constructor (spawnLevel - 1, spawnDirection is the same)
+		Flame childFlame; // TODO: fire constructor (spawnLevel - 1, spawnDirection is the same)
 
 		// TODO: determine scale along spawnDirection based on ColliderBox
-		glm::vec3 spawn_offset = {spawnDirection.x * collider->dimensions.x * 0.5f,
+		glm::vec3<float> spawnOffset = {spawnDirection.x * collider->dimensions.x * 0.5f,
 								  spawnDirection.y * collider->dimensions.y * 0.5f,
 								  spawnDirection.z * collider->dimensions.z * 0.5f};
-		childFlame->gameObject->position = gameObject->position + spawn_offset;
+		childFlame->gameObject->position = gameObject->position + spawnOffset;
 		childFlame.spread();
 	};
 
@@ -298,6 +324,7 @@ struct Fire {
 		// TODO
 	};
 };
+Flame flamePrefab;
 
 struct Medal {
 	// TODO
@@ -306,12 +333,16 @@ struct Medal {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider;
+	ColliderBox *collider = &{"medal", {1.2f, 1.2f, 1.2f}, {0, 0, 0}};; // TODO
 
 	/*********************
 	 * Spinning Animation
 	 *********************/
 	float ROTATE_SPEED = pi_v / 4; // radians per second
+
+	Medal(GameObject &obj) {
+		gameObject = obj;
+	};
 
 	void update() {
 		/************
@@ -327,40 +358,89 @@ struct Spring {
 	/************
 	 * Animation
 	 ************/
-	float SHOOT_TIME
-	float SINK_TIME = 1;
+	float SHOOT_TIME = 0.1f;
+	float SINK_TIME = 0.9;
+	float shootTimer = 0;
+	float sinkTimer = 0.0f;
 
 	/**********
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider; // TODO
+	ColliderBox *collider = &{"spring", {2, 2, 1.6f}, {0, 0, 0}};; // TODO
+
+	Spring(GameObject &obj) {
+		gameObject = obj;
+	};
 
 	void update() {
 		/************
 		 * Animation
 		 ************/
-		gameObject->transform->rotation = glm::rotate(gameObject->transform->rotation, ROTATE_SPEED * t, {0.0f, 0.0f, 1.0f});
+		// TODO
 	};
 };
+Spring springPrefab;
 
 struct Building {
 	/**********
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider; // TODO
+	ColliderBox *collider = &{"building", {4, 4, 4}, {0, 0, 0}};; // TODO
+
+	Building(GameObject* bp) {
+		buildingPieces = bp;
+	};
 };
+Building buildingPrefab;
 
 struct Tree {
 	/**********
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider; // TODO
+	ColliderBox *collider = &{"tree", {2, 2, 6}, {0, 0, 0}};; // TODO
+
+	Tree(GameObject &obj) {
+		gameObject = obj;
+	};
 };
+Tree treePrefab;
+
+struct Ground {
+	/**********
+	 * Structs
+	 **********/
+	GameObject *gameObject;
+	ColliderBox *collider; // TODO
+
+	Ground(GameObject &obj) {
+		gameObject = obj;
+	};
+};
+Ground *ground;
 
 GLuint burning_meshes_for_lit_color_texture_program = 0;
+/***************
+ * Game Objects
+ ***************/
+// Ground
+Ground ground({nullptr});
+
+// Buildings, Trees, and Springs (fixed in the world)
+std::array<Building, 6> buildings;
+std::array<Tree, 3> trees;
+std::array<Spring, 9> springs;
+
+// Medals and Meteors (procedurally generated)
+Medal theMedal;
+std::vector<Meteor> meteors;
+
+// Player
+Player player({nullptr});
+
+// TODO: Figure this out lol
 // Load< MeshBuffer > hexapod_meshes(LoadTagDefault, []() -> MeshBuffer const * {
 // 	MeshBuffer const *ret = new MeshBuffer(data_path("hexapod.pnct"));
 // 	hexapod_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
@@ -392,7 +472,7 @@ Load< MeshBuffer > burnin_meshes(LoadTagDefault, []() -> MeshBuffer const * {
 
 Load< Scene > burnin_scene(LoadTagDefault, []() -> Scene const * {
 	return new Scene(data_path("burnin.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
-		Mesh const &mesh = hexapod_meshes->lookup(mesh_name);
+		Mesh const &mesh = burnin_meshes->lookup(mesh_name);
 
 		scene.drawables.emplace_back(transform);
 		Scene::Drawable &drawable = scene.drawables.back();
@@ -403,12 +483,23 @@ Load< Scene > burnin_scene(LoadTagDefault, []() -> Scene const * {
 		drawable.pipeline.type = mesh.type;
 		drawable.pipeline.start = mesh.start;
 		drawable.pipeline.count = mesh.count;
-
 	});
 });
 
+&Scene::Drawable new_drawable(Mesh const &mesh) {
+	Scene::Drawable &drawable = burnin_scene->drawables.back();
+	drawable.pipeline = lit_color_texture_program_pipeline;
+
+	drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
+	drawable.pipeline.type = mesh.type;
+	drawable.pipeline.start = mesh.start;
+	drawable.pipeline.count = mesh.count;
+
+	return drawable;
+}
+
 // Makes a copy of a scene, in case you want to modify it.
-PlayMode::PlayMode() : scene(*hexapod_scene) {
+PlayMode::PlayMode() : scene(*burnin_scene) {
 	//get pointers to leg for convenience:
 	for (auto &transform : scene.transforms) {
 	// 	if (transform.name == "Hip.FL") hip = &transform;
@@ -422,6 +513,77 @@ PlayMode::PlayMode() : scene(*hexapod_scene) {
 	// hip_base_rotation = hip->rotation;
 	// upper_leg_base_rotation = upper_leg->rotation;
 	// lower_leg_base_rotation = lower_leg->rotation;
+
+	/******************************************************
+	 * 1) Get transforms to prefabs
+	 * (player, ground, and Medal don't need prefabs
+	 *  since there's only one of each on field at a time)
+	 ******************************************************/
+	for (auto &transform : scene.transforms) {
+		switch (transform.name) {
+			// case "Player":
+			// 	break;
+			case "Meteor":
+				meteorPrefab = {&{&transform}};
+				break;
+			case "Building":
+				buildingPrefab = {&{&transform}};
+				break;
+			case "Spring":
+				springPrefab = {&{&transform}};
+				break;
+			case "Flame":
+				flamePrefab = {&{&transform}};
+				break;
+			case "Tree":
+				treePrefab = {&{&transform}};
+				break;
+			default:
+				break;
+		}
+	}
+
+	/*************************************
+	 * 2) Set locations for fixed objects
+	 *************************************/
+	// Buildings
+	{
+		// see og design doc for reference
+
+		// bottom right
+		Scene::Transform *tf0 = &{"building0", {-6f, -10f, 2f}};
+		Scene::Drawable &dr0 = new_drawable(burnin_meshes->lookup("Building"));
+		buildings[0] = {&{tf0, dr0}};
+
+		// bottom left
+		Scene::Transform *tf1 = &{"building1", {-10f, -10f, 2f}};
+		Scene::Drawable &dr1 = new_drawable(burnin_meshes->lookup("Building"));
+		buildings[1] = {&{tf1, dr1}};
+
+		// middle left down
+		Scene::Transform *tf2 = &{"building2", {-14f, -2f, 2f}};
+		Scene::Drawable &dr2 = new_drawable(burnin_meshes->lookup("Building"));
+		buildings[2] = {&{tf2, dr2}};
+
+		// middle left up
+		Scene::Transform *tf3 = &{"building3", {-14f, 2f, 2f}};
+		Scene::Drawable &dr3 = new_drawable(burnin_meshes->lookup("Building"));
+		buildings[3] = {&{tf3, dr3}};
+
+		// top right (ground floor)
+		Scene::Transform *tf4 = &{"building4", {-6, 2f, 2f}};
+		Scene::Drawable &dr4 = new_drawable(burnin_meshes->lookup("Building"));
+		buildings[3] = {&{tf4, dr4}};
+
+		// top right (upper floor floor)
+		Scene::Transform *tf5 = &{"building5", {-6, 2f, 6f}};
+		Scene::Drawable &dr5 = new_drawable(burnin_meshes->lookup("Building"));
+		buildings[3] = {&{tf5, dr5}};
+	}
+
+	// Trees
+
+	// Springs
 
 	//get pointer to camera for convenience:
 	if (scene.cameras.size() != 1) throw std::runtime_error("Expecting scene to have exactly one camera, but it has " + std::to_string(scene.cameras.size()));
@@ -494,21 +656,21 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 void PlayMode::update(float elapsed) {
 
 	//slowly rotates through [0,1):
-	wobble += elapsed / 10.0f;
-	wobble -= std::floor(wobble);
+	// wobble += elapsed / 10.0f;
+	// wobble -= std::floor(wobble);
 
-	hip->rotation = hip_base_rotation * glm::angleAxis(
-		glm::radians(5.0f * std::sin(wobble * 2.0f * float(M_PI))),
-		glm::vec3(0.0f, 1.0f, 0.0f)
-	);
-	upper_leg->rotation = upper_leg_base_rotation * glm::angleAxis(
-		glm::radians(7.0f * std::sin(wobble * 2.0f * 2.0f * float(M_PI))),
-		glm::vec3(0.0f, 0.0f, 1.0f)
-	);
-	lower_leg->rotation = lower_leg_base_rotation * glm::angleAxis(
-		glm::radians(10.0f * std::sin(wobble * 3.0f * 2.0f * float(M_PI))),
-		glm::vec3(0.0f, 0.0f, 1.0f)
-	);
+	// hip->rotation = hip_base_rotation * glm::angleAxis(
+	// 	glm::radians(5.0f * std::sin(wobble * 2.0f * float(M_PI))),
+	// 	glm::vec3(0.0f, 1.0f, 0.0f)
+	// );
+	// upper_leg->rotation = upper_leg_base_rotation * glm::angleAxis(
+	// 	glm::radians(7.0f * std::sin(wobble * 2.0f * 2.0f * float(M_PI))),
+	// 	glm::vec3(0.0f, 0.0f, 1.0f)
+	// );
+	// lower_leg->rotation = lower_leg_base_rotation * glm::angleAxis(
+	// 	glm::radians(10.0f * std::sin(wobble * 3.0f * 2.0f * float(M_PI))),
+	// 	glm::vec3(0.0f, 0.0f, 1.0f)
+	// );
 
 	//move camera:
 	{
