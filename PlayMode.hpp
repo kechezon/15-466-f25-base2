@@ -2,6 +2,8 @@
 
 #include "Scene.hpp"
 
+#include "Mesh.hpp"
+
 #include <glm/glm.hpp>
 
 #include <vector>
@@ -16,6 +18,8 @@ struct PlayMode : Mode {
 	virtual bool handle_event(SDL_Event const &, glm::uvec2 const &window_size) override;
 	virtual void update(float elapsed) override;
 	virtual void draw(glm::uvec2 const &drawable_size) override;
+	
+	Scene::Drawable new_drawable(Mesh const &mesh, Scene::Transform *tf, PlayMode *pm);
 
 	//----- game state -----
 
@@ -23,7 +27,7 @@ struct PlayMode : Mode {
 	struct Button {
 		uint8_t downs = 0;
 		uint8_t pressed = 0;
-	} left, right, down, up;
+	} left, right, down, up; //space, jBtn, kBtn;
 
 	//local copy of the game scene (so code can change it during gameplay):
 	Scene scene;

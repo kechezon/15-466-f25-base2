@@ -13,8 +13,12 @@
 #include <random>
 #include <cmath>
 #include <numbers>
+#include <iostream>
 
 const float GROUND_LEVEL = 0.0f;
+// const std::array<std::array<float, 2>, 4> four_corners = {{-32.0f, 32.0f}, {32.0f, 32.0f},
+// 														  {-32.0f, -32.0f}, {32.0f, -32.0f}};
+const std::array<std::array<float, 2>, 4> four_corners = {};
 GLuint burning_meshes_for_lit_color_texture_program = 0;
 
 Load< MeshBuffer > burnin_meshes(LoadTagDefault, []() -> MeshBuffer const * {
@@ -39,20 +43,6 @@ Load< Scene > burnin_scene(LoadTagDefault, []() -> Scene const * {
 	});
 });
 
-Scene::Drawable new_drawable(Mesh const &mesh, Scene::Transform *tf) {
-	Scene::Drawable drawable = burnin_scene->drawables.back();
-	drawable.pipeline = lit_color_texture_program_pipeline;
-
-	drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
-	drawable.pipeline.type = mesh.type;
-	drawable.pipeline.start = mesh.start;
-	drawable.pipeline.count = mesh.count;
-
-	drawable.transform = tf;
-
-	return drawable;
-}
-
 /*************************
  * General Object Structs
  *************************/
@@ -69,38 +59,31 @@ struct GameObject {
 	};
 };
 
-struct ColliderBox {
-	std::string tag;
-	glm::vec3 dimensions;
+/*******************************************************************************************************
+ * According to this Math Stack Exchange Answer:
+ * https://math.stackexchange.com/questions/2651710/simplest-way-to-determine-if-two-3d-boxes-intersect
+ * 
+ * Working with spheres/a sphere cluster is significantly easier than working with boxes,
+ * and... I agree, so we're gonna do that!
+ *******************************************************************************************************/
+struct ColliderSphere {
 	glm::vec3 offset; // from a gameObject
+	std::string collider_tag;
+	float radius;
+	GameObject *obj;
 
-	bool collider_test(GameObject myObj, GameObject otherObj, ColliderBox other) {
-		glm::vec3 myPosition = myObj->transform->position;
-		glm::vec3 otherPosition = otherObj->transform->position;
+	bool collider_test(ColliderSphere *other) {
+		GameObject *otherObj = other->obj;
+		// calculate vector from me to other, determine if magnitude is < myRadius + otherRadius
+		glm::vec3 myCentroid = obj->transform->position + offset;
+		glm::vec3 otherCentroid = otherObj->transform->position + other->offset;
+		glm::vec3 vecToOther = otherCentroid - myCentroid;
+		float magnitude = std::sqrtf((vecToOther.x * vecToOther.x) +
+									 (vecToOther.y * vecToOther.y) +
+									 (vecToOther.z * vecToOther.z));
+		float collisionThreshold = radius + other->radius;
 
-		// TODO: test each corner of this box against the bounds of the other box
-
-		// for (int myIdx = 0; myIdx < 3; myIdx++) {
-		// 	// glm::vec3 toMyBorder0 = glm::vec3(0.0f);
-		// 	// toBorderMe0[myIdx] = myPosition[myIdx] + (dimensions[myIdx] / 2) + offset[myIdx];
-		// 	// toBorderMe0 = myObj->transform->rotation * toBorderMe0;
-
-		// 	// glm::vec3 toBorderMe1 = glm::vec3(0.0f);
-		// 	// toBorderMe1[myIdx] = myPosition[myIdx] - (dimensions[myIdx] / 2) + offset[myIdx];
-		// 	// toBorderMe1 = myObj->transform->rotation * toBorderMe1;
-
-		// 	for (int otherIdx = 0; otherIdx < 3; otherIdx++) {
-		// 		glm::vec3 toBorderOther0 = glm::vec3(0.0f);
-		// 		toBorderOther0[otherIdx] = myPosition[otherIdx] + (dimensions[otherIdx] / 2) + offset[otherIdx];
-		// 		toBorderOther0 = otherObj->transform->rotation * toBorderOther0;
-
-		// 		glm::vec3 toBorderOther1 = glm::vec3(0.0f);
-		// 		toBorderOther1[otherIdx] = myPosition[otherIdx] - (dimensions[otherIdx] / 2) + offset[otherIdx];
-		// 		toBorderOther1 = otherObj->transform->rotation * toBorderOther1;
-		// 	}
-		// }
-
-		return false;
+		return magnitude < collisionThreshold;
 	};
 };
 
@@ -135,7 +118,10 @@ struct SquetchearAnimator {
 struct Player {
 	// to initialize
 	GameObject *gameObject;
-	ColliderBox *collider = new ColliderBox{"player", {1, 2, 2}, {0, 0, 0}};
+	std::vector<ColliderSphere*> colliders = {new ColliderSphere{{-0.5f, -0.5f, 0}, "player", 1},
+											   new ColliderSphere{{-0.5f, 0.5f, 0}, "player", 1},
+											   new ColliderSphere{{0.5f, -0.5f, 0}, "player", 1},
+											   new ColliderSphere{{0.5f, 0.5f, 0}, "player", 1}};
 	PhysicsObject *physicsObject = new PhysicsObject{{0, 0, 0}, {0, 0, -9.81f}, 1};
 	SquetchearAnimator *animator = nullptr; // TODO
 
@@ -149,8 +135,14 @@ struct Player {
 	float COMBO_DURATION = 10; // if you don't collect a new medal in this time, the multiplier resets
 	float comboTimer = 0;
 
+	/******************
+	 * Hazard values
+	 ******************/
+	float FLAME_DPS = 13.0f;
+	float METEOR_DAMAGE = 20.0f;
+
 	/*********************
-	 * physics components
+	 * Physics Components
 	 *********************/
 	// TODO: adjust values as needed
 
@@ -177,7 +169,7 @@ struct Player {
 	float boostTimer = 0;
 
 	// spring interactions
-	ColliderBox *lastSpring;
+	ColliderSphere *lastSpring;
 	
 	// transform pre-animation
 	glm::vec3 game_logic_position = glm::vec3(0.0f, 0.0f, 1.0f);
@@ -190,6 +182,8 @@ struct Player {
 
 	Player(GameObject *obj) {
 		gameObject = obj;
+		for (ColliderSphere* collider : colliders)
+			collider->obj = obj;
 	};
 
 	void turn(float direction, float t) {
@@ -248,7 +242,7 @@ struct Player {
 		return false;
 	};
 
-	bool spring_jump (ColliderBox *springBox, float strength) { // units per second
+	bool spring_jump (ColliderSphere *springBox, float strength) { // units per second
 		// TODO
 		if (springBox == lastSpring) return false;
 		physicsObject->velocity.z += strength;
@@ -257,50 +251,95 @@ struct Player {
 		return true;
 	};
 
-	void update(float t) {
+	void update(float t, std::vector<ColliderSphere*> otherColliders) {
 		glm::vec3 *velocity = &(physicsObject->velocity);
 		Scene::Transform *transform = gameObject->transform;
 
 		/******************
 		 * Physics Updates
 		 ******************/
-		glm::vec2 latVelNorm;
-		if (!accelerating && !airborne && glm::vec2((*velocity).x, (*velocity).y) != glm::vec2(0.0f)) { // decel
+		{
+			glm::vec2 latVelNorm;
+			if (!accelerating && boostTimer <= 0 && !airborne && glm::vec2((*velocity).x, (*velocity).y) != glm::vec2(0.0f)) { // decel
+				latVelNorm = glm::normalize(glm::vec2((*velocity).x, (*velocity).y));
+				(*velocity).x -= latVelNorm.x * FRICTION_DECEL;
+				(*velocity).y -= latVelNorm.y * FRICTION_DECEL;
+			}
+
+			// clamp lateral speed
 			latVelNorm = glm::normalize(glm::vec2((*velocity).x, (*velocity).y));
-			(*velocity).x -= latVelNorm.x * FRICTION_DECEL;
-			(*velocity).y -= latVelNorm.y * FRICTION_DECEL;
+			float maxLatSpeed = TOP_BASE_SPEED_LATERAL * (boostTimer <= 0 ? 1 : BOOST_POWER);
+			float finalLatSpeed = physicsObject->lateralSpeed();
+			if (physicsObject->lateralSpeed() > maxLatSpeed) { // bring it down to top speed if exceeding it
+				float speedDecay = (!airborne ? FRICTION_DECEL : AIR_ACCEL) * 4 * t;
+				finalLatSpeed = std::max(maxLatSpeed, finalLatSpeed - speedDecay);
+			}
+			glm::vec2 newLatVel = latVelNorm * finalLatSpeed;
+			(*velocity).x = newLatVel.x;
+			(*velocity).y = newLatVel.y;
+
+			// Apply gravity
+			*velocity += physicsObject->gravity * t;
+
+			// Update position based on gravity
+			game_logic_position += (*velocity * t);
 		}
-
-		// clamp lateral speed
-		latVelNorm = glm::normalize(glm::vec2((*velocity).x, (*velocity).y));
-		float maxLatSpeed = TOP_BASE_SPEED_LATERAL * (boostTimer <= 0 ? 1 : BOOST_POWER);
-		float finalLatSpeed = physicsObject->lateralSpeed();
-		if (physicsObject->lateralSpeed() > maxLatSpeed) { // bring it down to top speed if exceeding it
-			float speedDecay = (!airborne ? FRICTION_DECEL : AIR_ACCEL) * 4 * t;
-			finalLatSpeed = std::max(maxLatSpeed, finalLatSpeed - speedDecay);
-		}
-		glm::vec2 newLatVel = latVelNorm * finalLatSpeed;
-		(*velocity).x = newLatVel.x;
-		(*velocity).y = newLatVel.y;
-
-		// Apply gravity
-		*velocity += physicsObject->gravity * t;
-
-		// Update position based on gravity
-		game_logic_position += (*velocity * t);
 
 		/******************
 		 * Collision logic
 		 ******************/
-		// TODO: player->medal, player->building, player->tree, player->ground
+		// TODO: player->building, player->tree, player->medal, player->ground, player->flame, player->meteor
+		{
+			for (size_t i = 0; i < otherColliders.size(); i++) {
+			ColliderSphere *other = otherColliders[i];
+			std::string otherTag = other->collider_tag;
+			if (otherTag == "building" || otherTag == "tree") {
+				for (ColliderSphere *collider : colliders) {
+					if (collider->collider_test(other)) {
+						// TODO: push back
+					}
+				}
+			}
+			else if (otherTag == "medal") {
+				if (collider->collider_test(other)) {
+					// add points, move medal
+					for (ColliderSphere *collider : colliders) {
+					
+					}
+				}
+			}
+			else if (otherTag == "medal") {
+				if (collider->collider_test(other)) {
+					// TODO: create flame
+					for (ColliderSphere *collider : colliders) {
+
+					}
+				}
+			}
+		}
 
 		/*********************
 		 * Game Logic Updates
 		 *********************/
-		accelerating = false;
-		if (boostTimer > 0) boostTimer = std::clamp(boostTimer - t, 0.0f, BOOST_TIME);
-		if (comboTimer > 0) comboTimer = std::clamp(comboTimer - t, 0.0f, COMBO_DURATION);
-		score += physicsObject->lateralSpeed() * t * SCORE_GAIN * multiplier;
+		{
+			accelerating = false;
+			if (boostTimer > 0) boostTimer = std::clamp(boostTimer - t, 0.0f, BOOST_TIME);
+			if (comboTimer > 0) comboTimer = std::clamp(comboTimer - t, 0.0f, COMBO_DURATION);
+			score += physicsObject->lateralSpeed() * t * SCORE_GAIN * multiplier;
+			
+			if (transform->position.z <= GROUND_LEVEL + 1) {
+				if (transform->position.x >= four_corners[0][0] && transform->position.y <= four_corners[0][1] &&
+					transform->position.x <= four_corners[1][0] && transform->position.y <= four_corners[1][1] &&
+					transform->position.x >= four_corners[2][0] && transform->position.y >= four_corners[2][1] &&
+					transform->position.x <= four_corners[3][0] && transform->position.y >= four_corners[3][1]) {
+						transform->position.z = GROUND_LEVEL + 1;
+						(*velocity).z = 0.0f;
+						airborne = false;
+				}
+				else
+					airborne = true;
+			}
+		}
 
 		/********************
 		 * Animation Updates
@@ -312,34 +351,6 @@ struct Player {
 	};
 };
 
-// TODO: Collisions
-struct Meteor {
-	GameObject *gameObject;
-	ColliderBox *collider = new ColliderBox{"meteor", {3.6f, 3.6f, 3.6f}, {0, 0, 0}};
-	PhysicsObject *physicsObject = new PhysicsObject{{0, 0, -50}}; // TODO
-
-	float DAMAGE_ON_IMPACT = 20;
-	float SPEED = 50;
-
-	Meteor(GameObject *obj = nullptr){
-		gameObject = obj;
-	};
-
-	void update(float t) {
-		/******************
-		 * Physics updates
-		 ******************/
-		glm::vec3 *velocity = &(physicsObject->velocity);
-		*velocity += physicsObject->gravity * t;
-		(*(gameObject->transform)).position += (*velocity) * t;
-
-		/******************
-		 * Collision logic
-		 ******************/
-		// TODO: meteor->player, meteor->building, meteor->tree, meteor->ground
-	};
-};
-
 struct Flame {
 	// TODO
 
@@ -347,12 +358,11 @@ struct Flame {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = new ColliderBox{"flame", {2, 2, 2}, {0, 0, 0}};; // TODO
+	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "flame", 1}; // TODO
 
 	/*************
 	 * Base Logic
 	 *************/
-	float damagePerSecond = 13.0f;
 	float BURN_DURATION = 3.0f;
 	float burnTimer = 0.0f;
 
@@ -364,31 +374,27 @@ struct Flame {
 
 	Flame(GameObject *obj = nullptr, int level = 0, glm::vec3 dir = glm::vec3(0.0f)) {
 		gameObject = obj;
+		collider->obj = obj;
 		spawnLevel = level;
 		spawnDirection = dir != glm::vec3(0.0f) ? glm::normalize(dir) : glm::vec3(0.0f);
 	};
 
-	void spread() {
+	void spread(PlayMode *pm) {
 		if (spawnLevel > 0) {
-			glm::vec3 spawnOffset = {spawnDirection.x * collider->dimensions.x * 0.5f,
-									spawnDirection.y * collider->dimensions.y * 0.5f,
-									spawnDirection.z * collider->dimensions.z * 0.5f};
+			glm::vec3 spawnOffset = {spawnDirection.x * collider->radius,
+									spawnDirection.y * collider->radius,
+									spawnDirection.z * collider->radius};
 			Scene::Transform *tf = new Scene::Transform();
 			tf->name = "flame";
 			tf->position = spawnOffset;
-			Scene::Drawable dr = (new_drawable(burnin_meshes->lookup("Flame"), tf));
+			Scene::Drawable dr = (pm->new_drawable(burnin_meshes->lookup("Flame"), tf, pm));
 			
 			Flame *childFlame = new Flame{new GameObject{tf, dr}, spawnLevel - 1, spawnDirection};
-			childFlame->spread();
+			childFlame->spread(pm);
 		}
 	};
 
-	void update(float t) {
-		/******************
-		 * Collision logic
-		 ******************/
-		// TODO: fire->player
-
+	void update(float t, std::vector<ColliderSphere*> otherColliders, PlayMode *pm) {
 		/*********************
 		 * Game Logic Updates
 		 *********************/
@@ -396,10 +402,54 @@ struct Flame {
 			burnTimer = std::clamp(burnTimer - t, 0.0f, BURN_DURATION);
 		else {
 			// TODO destroy self
+			// pm->scene.drawables.remove(const gameObject->drawable);
 			free(gameObject);
 			free(collider);
 		}
 		// TODO
+	};
+};
+
+// TODO: Collisions
+struct Meteor {
+	GameObject *gameObject;
+	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "meteor", 1.8f};
+	PhysicsObject *physicsObject = new PhysicsObject{{0, 0, -50}}; // TODO
+
+	float SPEED = 10;
+
+	Meteor(GameObject *obj = nullptr){
+		gameObject = obj;
+		collider->obj = obj;
+	};
+
+	void update(float t, std::vector<ColliderSphere*> otherColliders) {
+		/******************
+		 * Physics updates
+		 ******************/
+		glm::vec3 *velocity = &(physicsObject->velocity);
+		*velocity += glm::vec3(0.0f, 0.0f, SPEED);
+		(*(gameObject->transform)).position += (*velocity) * t;
+
+		/******************
+		 * Collision logic
+		 ******************/
+		// TODO: meteor->building, meteor->tree, meteor->ground
+		for (size_t i = 0; i < otherColliders.size(); i++) {
+			ColliderSphere *other = otherColliders[i];
+			std::string otherTag = other->collider_tag;
+			if (other->obj->transform->position.z <= GROUND_LEVEL + other->radius ||
+				otherTag == "building" || otherTag == "tree") {
+				if (collider->collider_test(other)) {
+					// TODO: create flame
+				}
+			}
+			else if (otherTag == "player") {
+				if (collider->collider_test(other)) {
+					// TODO: create flame
+				}
+			}
+		}
 	};
 };
 
@@ -410,7 +460,7 @@ struct Medal {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = new ColliderBox{"medal", {1.8f, 1.8f, 1.8f}, {0, 0, 0}};; // TODO
+	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "medal", 0.9f};; // TODO
 
 	/*********************
 	 * Spinning Animation
@@ -419,6 +469,7 @@ struct Medal {
 
 	Medal(GameObject *obj = nullptr) {
 		gameObject = obj;
+		collider->obj = obj;
 	};
 
 	void update(float t) {
@@ -444,13 +495,14 @@ struct Spring {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = new ColliderBox{"spring", {3, 3, 2.4f}, {0, 0, 0}}; // TODO
+	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "spring", 1.5f}; // TODO
 
 	Spring(GameObject *obj = nullptr) {
 		gameObject = obj;
+		collider->obj = obj;
 	};
 
-	void update() {
+	void update(float t) {
 		/************
 		 * Animation
 		 ************/
@@ -463,10 +515,12 @@ struct Building {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = new ColliderBox{"building", {4, 4, 4}, {0, 0, 0}};; // TODO
+	std::array<ColliderSphere*, 512> colliders; // TODO
 
-	Building(GameObject *bp = nullptr) {
-		gameObject = bp;
+	Building(GameObject *obj = nullptr) {
+		gameObject = obj;
+		for (ColliderSphere* collider : colliders)
+			collider->obj = obj;
 	};
 };
 
@@ -475,10 +529,14 @@ struct Tree {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider = new ColliderBox{"tree", {3, 3, 9}, {0, 0, 0}};; // TODO
+	std::array<ColliderSphere*, 3> colliders = {new ColliderSphere{{0, 0, -3}, "tree", 1.5f},
+												new ColliderSphere{{0, 0, 0}, "tree", 1.5f},
+												new ColliderSphere{{0, 0, 3}, "tree", 1.5f}};
 
 	Tree(GameObject *obj = nullptr) {
 		gameObject = obj;
+		for (ColliderSphere* collider : colliders)
+			collider->obj = obj;
 	};
 };
 
@@ -487,7 +545,7 @@ struct Ground {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderBox *collider; // TODO
+	// no collider: use ground_level variable
 
 	Ground(GameObject *obj = nullptr) {
 		gameObject = obj;
@@ -508,10 +566,15 @@ std::array<Spring, 9> springs;
 
 // Medals and Meteors (procedurally generated)
 Medal theMedal;
+std::array<glm::vec3, 8> medalSpawnPositions = {glm::vec3(0, 4, 2), glm::vec3(0, -4, 2),
+												glm::vec3(-28, -4, 10), glm::vec3(-12, -12, 18), glm::vec3(-24, 24, 2),
+												glm::vec3(8, -16, 2), glm::vec3(24, 20, 2), glm::vec3(28, -20, 2)};
 std::vector<Meteor> meteors;
 
 // Player
 Player player({nullptr});
+
+std::vector<ColliderSphere*> allColliders;
 
 // TODO: Figure this out lol
 // Load< MeshBuffer > hexapod_meshes(LoadTagDefault, []() -> MeshBuffer const * {
@@ -539,6 +602,7 @@ Player player({nullptr});
 
 // Makes a copy of a scene, in case you want to modify it.
 PlayMode::PlayMode() : scene(*burnin_scene) {
+	std::cout << "scene" << std::endl;
 	//get pointers to leg for convenience:
 	// for (auto &transform : scene.transforms) {
 	// // 	if (transform.name == "Hip.FL") hip = &transform;
@@ -564,42 +628,42 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 		Scene::Transform *tf0 = new Scene::Transform();
 		tf0->name = "building0";
 		tf0->position = {-12.0f, -20.0f, 4.0f};
-		Scene::Drawable dr0 = new_drawable(burnin_meshes->lookup("Building"), tf0);
+		Scene::Drawable dr0 = new_drawable(burnin_meshes->lookup("Building"), tf0, this);
 		buildings[0] = {new GameObject{tf0, dr0}};
 
 		// bottom left
 		Scene::Transform *tf1 = new Scene::Transform();
 		tf1->name = "building1";
 		tf1->position = {-20.0f, -20.0f, 4.0f};
-		Scene::Drawable dr1 = new_drawable(burnin_meshes->lookup("Building"), tf1);
+		Scene::Drawable dr1 = new_drawable(burnin_meshes->lookup("Building"), tf1, this);
 		buildings[1] = {new GameObject{tf1, dr1}};
 
 		// middle left down
 		Scene::Transform *tf2 = new Scene::Transform();
 		tf2->name = "building2";
 		tf2->position = {-28.0f, -4.0f, 4.0f};
-		Scene::Drawable dr2 = new_drawable(burnin_meshes->lookup("Building"), tf2);
+		Scene::Drawable dr2 = new_drawable(burnin_meshes->lookup("Building"), tf2, this);
 		buildings[2] = {new GameObject{tf2, dr2}};
 
 		// middle left up
 		Scene::Transform *tf3 = new Scene::Transform();
 		tf3->name = "building3";
 		tf3->position = {-28.0f, 4.0f, 4.0f};
-		Scene::Drawable dr3 = new_drawable(burnin_meshes->lookup("Building"), tf3);
+		Scene::Drawable dr3 = new_drawable(burnin_meshes->lookup("Building"), tf3, this);
 		buildings[3] = {new GameObject{tf3, dr3}};
 
 		// top right (ground floor)
 		Scene::Transform *tf4 = new Scene::Transform();
 		tf4->name = "building4";
 		tf4->position = {-12.0f, 4.0f, 4.0f};
-		Scene::Drawable dr4 = new_drawable(burnin_meshes->lookup("Building"), tf4);
+		Scene::Drawable dr4 = new_drawable(burnin_meshes->lookup("Building"), tf4, this);
 		buildings[4] = {new GameObject{tf4, dr4}};
 
 		// top right (upper floor floor)
 		Scene::Transform *tf5 = new Scene::Transform();
 		tf5->name = "building5";
 		tf5->position = {-12.0f, 4.0f, 12.0f};
-		Scene::Drawable dr5 = new_drawable(burnin_meshes->lookup("Building"), tf5);
+		Scene::Drawable dr5 = new_drawable(burnin_meshes->lookup("Building"), tf5, this);
 		buildings[5] = {new GameObject{tf5, dr5}};
 	}
 
@@ -610,6 +674,19 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 	//get pointer to camera for convenience:
 	if (scene.cameras.size() != 1) throw std::runtime_error("Expecting scene to have exactly one camera, but it has " + std::to_string(scene.cameras.size()));
 	camera = &scene.cameras.front();
+}
+
+Scene::Drawable PlayMode::new_drawable(Mesh const &mesh, Scene::Transform *tf, PlayMode *pm) {
+	pm->scene.drawables.emplace_back(tf);
+	Scene::Drawable drawable = pm->scene.drawables.back();
+	drawable.pipeline = lit_color_texture_program_pipeline;
+
+	drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
+	drawable.pipeline.type = mesh.type;
+	drawable.pipeline.start = mesh.start;
+	drawable.pipeline.count = mesh.count;
+
+	return drawable;
 }
 
 PlayMode::~PlayMode() {
@@ -636,8 +713,20 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 		} else if (evt.key.key == SDLK_S) {
 			down.downs += 1;
 			down.pressed = true;
-			return true;
-		}
+			return true; }
+		// } else if (evt.key.key == SDLK_J) {
+		// 	jBtn.downs += 1;
+		// 	jBtn.pressed = true;
+		// 	return true;
+		// } else if (evt.key.key == SDLK_K) {
+		// 	kBtn.downs += 1;
+		// 	kBtn.pressed = true;
+		// 	return true;
+		// } else if (evt.key.key == SDLK_SPACE) {
+		// 	space.downs += 1;
+		// 	space.pressed = true;
+		// 	return true;
+		// }
 	} else if (evt.type == SDL_EVENT_KEY_UP) {
 		if (evt.key.key == SDLK_A) {
 			left.pressed = false;
@@ -650,8 +739,17 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 			return true;
 		} else if (evt.key.key == SDLK_S) {
 			down.pressed = false;
-			return true;
-		}
+			return true;}
+		// } else if (evt.key.key == SDLK_J) {
+		// 	jBtn.pressed = false;
+		// 	return true;
+		// } else if (evt.key.key == SDLK_K) {
+		// 	kBtn.pressed = false;
+		// 	return true;
+		// } else if (evt.key.key == SDLK_SPACE) {
+		// 	space.pressed = false;
+		// 	return true;
+		// }
 	} else if (evt.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
 		if (SDL_GetWindowRelativeMouseMode(Mode::window) == false) {
 			SDL_SetWindowRelativeMouseMode(Mode::window, true);
@@ -698,29 +796,88 @@ void PlayMode::update(float elapsed) {
 	{
 
 		//combine inputs into a move:
-		constexpr float PlayerSpeed = 30.0f;
-		glm::vec2 move = glm::vec2(0.0f);
-		if (left.pressed && !right.pressed) move.x =-1.0f;
-		if (!left.pressed && right.pressed) move.x = 1.0f;
-		if (down.pressed && !up.pressed) move.y =-1.0f;
-		if (!down.pressed && up.pressed) move.y = 1.0f;
+		// constexpr float PlayerSpeed = 30.0f;
+		// glm::vec2 move = glm::vec2(0.0f);
+		// if (left.pressed && !right.pressed) move.x =-1.0f;
+		// if (!left.pressed && right.pressed) move.x = 1.0f;
+		// if (down.pressed && !up.pressed) move.y =-1.0f;
+		// if (!down.pressed && up.pressed) move.y = 1.0f;
 
-		//make it so that moving diagonally doesn't go faster:
-		if (move != glm::vec2(0.0f)) move = glm::normalize(move) * PlayerSpeed * elapsed;
+		// //make it so that moving diagonally doesn't go faster:
+		// if (move != glm::vec2(0.0f)) move = glm::normalize(move) * PlayerSpeed * elapsed;
 
-		glm::mat4x3 frame = camera->transform->make_parent_from_local();
-		glm::vec3 frame_right = frame[0];
-		//glm::vec3 up = frame[1];
-		glm::vec3 frame_forward = -frame[2];
+		// glm::mat4x3 frame = camera->transform->make_parent_from_local();
+		// glm::vec3 frame_right = frame[0];
+		// //glm::vec3 up = frame[1];
+		// glm::vec3 frame_forward = -frame[2];
 
-		camera->transform->position += move.x * frame_right + move.y * frame_forward;
+		// camera->transform->position += move.x * frame_right + move.y * frame_forward;
 	}
+
+	// meteor spawn manager
+	{
+		
+	}
+
+	// // player movement
+	// {
+	// 	if (space.pressed) player.jump();
+	// 	if (!jBtn.pressed && kBtn.pressed) player.charge_brake();
+	// 	if (left.pressed && !right.pressed) player.turn(-1, elapsed);
+	// 	if (!left.pressed && right.pressed) player.turn(1, elapsed);
+	// 	if (jBtn.pressed && !kBtn.pressed) player.accelerate();
+	// }
+
+	// // entity updates
+	// {
+	// 	// add colliders
+	// 	allColliders = {};
+	// 	buildings;
+	// 	trees;
+	// 	springs;
+
+	// 	// player
+	// 	for (ColliderSphere* collider : player->colliders)
+	// 		allColliders.emplace_back(collider);
+	// 	// medal
+	// 	allColliders.emplace_back(theMedal.collider);
+
+	// 	for (Building building : buildings) {
+	// 		for (ColliderSphere* collider : building->colliders)
+	// 			allColliders.emplace_back(collider);
+	// 	}
+	// 	for (Tree tree : trees) {
+	// 		for (ColliderSphere* collider : tree->colliders)
+	// 			allColliders.emplace_back(collider);
+			
+	// 	}
+	// 	for (Spring spring : springs) {
+	// 		allColliders.emplace_back(spring.collider);
+	// 	}
+	// 	for (Meteor meteor : meteors) {
+	// 		allColliders.emplace_back(meteor.collider);
+	// 	}
+
+	// 	player.update(elapsed, allColliders);
+	// 	theMedal.update(elapsed);
+
+	// 	for (Spring spring : springs) {
+	// 		spring.update(elapsed)
+	// 	}
+	// 	for (Meteor meteor : meteors) {
+	// 		meteor.update(elapsed, otherColliders);
+	// 	}
+	// }
+
 
 	//reset button press counters:
 	left.downs = 0;
 	right.downs = 0;
 	up.downs = 0;
 	down.downs = 0;
+	// space.downs = 0;
+	// jBtn.downs = 0;
+	// kBtn.downs = 0;
 }
 
 void PlayMode::draw(glm::uvec2 const &drawable_size) {
