@@ -14,6 +14,7 @@
 #include <cmath>
 #include <numbers>
 #include <iostream>
+#include <cstdlib>
 
 const float GROUND_LEVEL = 0.0f;
 std::vector<glm::vec2> four_corners = {glm::vec2(-32.0f, 32.0f), glm::vec2(32.0f, 32.0f),
@@ -415,39 +416,48 @@ struct Flame {
 struct Meteor {
 	GameObject *gameObject;
 	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "meteor", 1.8f};
-	PhysicsObject *physicsObject = new PhysicsObject{{0, 0, -50}}; // TODO
+	PhysicsObject *physicsObject = new PhysicsObject{{0, 0, -20.0f}};
+	bool exploded = false;
 
-	float SPEED = 10;
+	float SPEED = -20;
 
 	Meteor(GameObject *obj = nullptr){
 		gameObject = obj;
 		collider->obj = obj;
 	};
 
-	void update(float t, std::vector<ColliderSphere*> otherColliders) {
+	void update(float t, std::vector<ColliderSphere*> otherColliders, std::list<Meteor*> meteor_list) {
 		/******************
 		 * Physics updates
 		 ******************/
 		glm::vec3 *velocity = &(physicsObject->velocity);
-		*velocity += glm::vec3(0.0f, 0.0f, SPEED);
-		(*(gameObject->transform)).position += (*velocity) * t;
+		// *velocity += glm::vec3(0.0f, 0.0f, SPEED);
+		gameObject->transform->position += (*velocity) * t;
+
+		if (!exploded) std::cout << gameObject->transform->position.z << std::endl;
 
 		/******************
 		 * Collision logic
 		 ******************/
+		if (!exploded && gameObject->transform->position.z <= GROUND_LEVEL + collider->radius) {
+			std::cout << "Hit the ground at " << gameObject->transform->position.z << " compared to " << (GROUND_LEVEL + collider->radius) << "!" << std::endl;
+			// TODO: destroy
+			exploded = true;
+		}
+
 		// TODO: meteor->building, meteor->tree, meteor->ground
 		for (size_t i = 0; i < otherColliders.size(); i++) {
 			ColliderSphere *other = otherColliders[i];
 			std::string otherTag = other->collider_tag;
-			if (other->obj->transform->position.z <= GROUND_LEVEL + other->radius ||
-				otherTag == "building" || otherTag == "tree") {
+			if (otherTag == "building" || otherTag == "tree") {
 				if (collider->collider_test(other)) {
-					// TODO: create flame
+					// TODO: create flames, destroy myself, remove from meteors
+					std::cout << "Hit! at " << otherTag << gameObject->transform->position.z << std::endl;
 				}
 			}
 			else if (otherTag == "player") {
 				if (collider->collider_test(other)) {
-					// TODO: create flame
+					// TODO: create flames
 				}
 			}
 		}
@@ -525,10 +535,10 @@ struct Building {
 			for (int y = 0; y < 8; y++) {
 				colliders[z].emplace_back();
 				for (int x = 0; x < 8; x++) {
-					glm::vec3 sphere_offset = glm::vec3(((x-4) * 2.0f) + 1.0f,
-														((y-4) * 2.0f) + 1.0f,
-														((z-4) * 2.0f) + 1.0f);
-					colliders[z][y].emplace_back(new ColliderSphere{sphere_offset, "building", 1.0f, obj});
+					glm::vec3 sphere_offset = glm::vec3(((x-4) * 1.0f) + 0.5f,
+														((y-4) * 1.0f) + 0.5f,
+														((z-4) * 1.0f) + 0.5f);
+					colliders[z][y].emplace_back(new ColliderSphere{sphere_offset, "building", 0.5f, obj});
 				}
 			}
 		}
@@ -563,6 +573,36 @@ struct Ground {
 	};
 };
 
+struct MeteorSpawner {
+	/************
+	 * Timer Data
+	 ************/
+	float SPAWN_TIME = 2;
+	float SPAWN_HEIGHT = 20;
+	float spawnTimer = 0;
+
+	void update(float t, std::list<Meteor*> &meteor_list, PlayMode *pm) {
+		if (spawnTimer <= 0) {
+			Scene::Transform *tf = new Scene::Transform();
+			tf->name = "meteor";
+
+			// 0-1 float generator from:
+			// https://stackoverflow.com/questions/686353/random-float-number-generation
+
+			tf->position = glm::vec3(-30.0f + (62.0f * ((float)std::rand()) / ((float)RAND_MAX)),
+									 -30.0f + (62.0f * ((float)std::rand()) / ((float)RAND_MAX)), SPAWN_HEIGHT);
+			// tf->rotation = glm::quat(1.0f, std::numbers::pi_v<float> / 4.0f, 0.0f, 0.0f);
+			Scene::Drawable dr = pm->new_drawable(burnin_meshes->lookup("Meteor"), tf, pm);
+			Meteor *meteor = new Meteor{new GameObject{tf, dr}};
+			meteor_list.emplace_back(meteor);
+			std::cout << "Spawned! " << meteor_list.size() << std::endl;
+			spawnTimer += SPAWN_TIME;
+		}
+
+		spawnTimer -= t;
+	}
+};
+MeteorSpawner *meteorSpawner = new MeteorSpawner{};
 
 
 /***************
@@ -571,19 +611,19 @@ struct Ground {
 Ground *ground = new Ground();
 
 // Buildings, Trees, and Springs (fixed in the world)
-std::array<Building, 6> buildings;
-std::array<Tree, 3> trees;
-std::array<Spring, 9> springs;
+std::array<Building*, 6> buildings;
+std::array<Tree*, 3> trees;
+std::array<Spring*, 7> springs;
 
 // Medals and Meteors (procedurally generated)
-Medal theMedal;
+Medal *theMedal;
 std::array<glm::vec3, 8> medalSpawnPositions = {glm::vec3(0, 4, 2), glm::vec3(0, -4, 2),
 												glm::vec3(-28, -4, 10), glm::vec3(-12, -12, 18), glm::vec3(-24, 24, 2),
 												glm::vec3(8, -16, 2), glm::vec3(24, 20, 2), glm::vec3(28, -20, 2)};
-std::vector<Meteor> meteors;
+std::list<Meteor*> meteors;
 
 // Player
-Player player({nullptr});
+Player *player;
 
 std::vector<ColliderSphere*> allColliders;
 
@@ -627,9 +667,36 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 	// upper_leg_base_rotation = upper_leg->rotation;
 	// lower_leg_base_rotation = lower_leg->rotation;
 
-	/*************************************
-	 * Set locations for fixed objects
-	 *************************************/
+	/*********************************************
+	 * Set locations for player and fixed objects
+	 *********************************************/
+	// Player
+	{
+		// Scene::Transform *tf = new Scene::Transform();
+		// tf->name = "player";
+		// tf->position = {0.0f, 0.0f, 1.0f};
+		// Scene::Drawable dr = new_drawable(burnin_meshes->lookup("Tireler"), tf, this);
+		// ground->gameObject = new GameObject{tf, dr};
+	}
+
+	// Medal
+	{
+		Scene::Transform *tf = new Scene::Transform();
+		tf->name = "medal";
+		tf->position = {0.0f, 0.0f, 1.0f};
+		Scene::Drawable dr = new_drawable(burnin_meshes->lookup("Medal"), tf, this);
+		theMedal = new Medal(new GameObject{tf, dr});
+	}
+
+	// Ground
+	{
+		Scene::Transform *tf = new Scene::Transform();
+		tf->name = "ground";
+		tf->position = {0.0f, 0.0f, -1.0f};
+		Scene::Drawable dr = new_drawable(burnin_meshes->lookup("Ground"), tf, this);
+		ground->gameObject = new GameObject{tf, dr};
+	}
+
 	// Buildings
 	{
 		// see og design doc for reference
@@ -637,49 +704,120 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 		// bottom right
 		Scene::Transform *tf0 = new Scene::Transform();
 		tf0->name = "building0";
-		tf0->position = {-12.0f, -20.0f, 4.0f};
+		tf0->position = {-12.0f, -12.0f, 4.0f};
 		Scene::Drawable dr0 = new_drawable(burnin_meshes->lookup("Building"), tf0, this);
-		buildings[0] = {new GameObject{tf0, dr0}};
+		buildings[0] = new Building{new GameObject{tf0, dr0}};
 
 		// bottom left
 		Scene::Transform *tf1 = new Scene::Transform();
 		tf1->name = "building1";
-		tf1->position = {-20.0f, -20.0f, 4.0f};
+		tf1->position = {-20.0f, -12.0f, 4.0f};
 		Scene::Drawable dr1 = new_drawable(burnin_meshes->lookup("Building"), tf1, this);
-		buildings[1] = {new GameObject{tf1, dr1}};
+		buildings[1] = new Building{new GameObject{tf1, dr1}};
 
 		// middle left down
 		Scene::Transform *tf2 = new Scene::Transform();
 		tf2->name = "building2";
-		tf2->position = {-28.0f, -4.0f, 4.0f};
+		tf2->position = {-28.0f, 8.0f, 4.0f};
 		Scene::Drawable dr2 = new_drawable(burnin_meshes->lookup("Building"), tf2, this);
-		buildings[2] = {new GameObject{tf2, dr2}};
+		buildings[2] = new Building{new GameObject{tf2, dr2}};
 
 		// middle left up
 		Scene::Transform *tf3 = new Scene::Transform();
 		tf3->name = "building3";
-		tf3->position = {-28.0f, 4.0f, 4.0f};
+		tf3->position = {-28.0f, 12.0f, 4.0f};
 		Scene::Drawable dr3 = new_drawable(burnin_meshes->lookup("Building"), tf3, this);
-		buildings[3] = {new GameObject{tf3, dr3}};
+		buildings[3] = new Building{new GameObject{tf3, dr3}};
 
 		// top right (ground floor)
 		Scene::Transform *tf4 = new Scene::Transform();
 		tf4->name = "building4";
-		tf4->position = {-12.0f, 4.0f, 4.0f};
+		tf4->position = {-12.0f, 20.0f, 4.0f};
 		Scene::Drawable dr4 = new_drawable(burnin_meshes->lookup("Building"), tf4, this);
-		buildings[4] = {new GameObject{tf4, dr4}};
+		buildings[4] = new Building{new GameObject{tf4, dr4}};
 
-		// top right (upper floor floor)
+		// top right (upper floor)
 		Scene::Transform *tf5 = new Scene::Transform();
 		tf5->name = "building5";
-		tf5->position = {-12.0f, 4.0f, 12.0f};
+		tf5->position = {-12.0f, 20.0f, 12.0f};
 		Scene::Drawable dr5 = new_drawable(burnin_meshes->lookup("Building"), tf5, this);
-		buildings[5] = {new GameObject{tf5, dr5}};
+		buildings[5] = new Building{new GameObject{tf5, dr5}};
 	}
 
 	// Trees
+	{
+		Scene::Transform *tf0 = new Scene::Transform();
+		tf0->name = "tree0";
+		tf0->position = {12.0f, 20.0f, 4.5f};
+		Scene::Drawable dr0 = new_drawable(burnin_meshes->lookup("Tree"), tf0, this);
+		trees[0] = new Tree{new GameObject{tf0, dr0}};
+
+		Scene::Transform *tf1 = new Scene::Transform();
+		tf1->name = "tree1";
+		tf1->position = {20.0f, -20.0f, 4.5f};
+		Scene::Drawable dr1 = new_drawable(burnin_meshes->lookup("Tree"), tf1, this);
+		trees[1] = new Tree{new GameObject{tf1, dr1}};
+
+		Scene::Transform *tf2 = new Scene::Transform();
+		tf2->name = "tree2";
+		tf2->position = {8.0f, -8.0f, 4.5f};
+		Scene::Drawable dr2 = new_drawable(burnin_meshes->lookup("Tree"), tf2, this);
+		trees[2] = new Tree{new GameObject{tf2, dr2}};
+	}
 
 	// Springs
+	{
+		// City:
+		// Bottom right
+		Scene::Transform *tf0 = new Scene::Transform();
+		tf0->name = "spring0";
+		tf0->position = {-12.0f, -20.0f, -0.5f};
+		Scene::Drawable dr0 = new_drawable(burnin_meshes->lookup("Spring"), tf0, this);
+		springs[0] = new Spring{new GameObject{tf0, dr0}};
+
+		// Bottom left
+		Scene::Transform *tf1 = new Scene::Transform();
+		tf1->name = "spring1";
+		tf1->position = {-20.0f, -12.0f, 7.5f};
+		Scene::Drawable dr1 = new_drawable(burnin_meshes->lookup("Spring"), tf1, this);
+		springs[1] = new Spring{new GameObject{tf1, dr1}};
+
+		// middle left
+		Scene::Transform *tf2 = new Scene::Transform();
+		tf2->name = "spring1";
+		tf2->position = {-26.0f, 12.0f, 7.5f};
+		Scene::Drawable dr2 = new_drawable(burnin_meshes->lookup("Spring"), tf2, this);
+		springs[2] = new Spring{new GameObject{tf2, dr2}};
+
+		// middle right
+		Scene::Transform *tf3 = new Scene::Transform();
+		tf3->name = "spring1";
+		tf3->position = {-12.0f, 18.0f, 15.5f};
+		Scene::Drawable dr3 = new_drawable(burnin_meshes->lookup("Spring"), tf3, this);
+		springs[3] = new Spring{new GameObject{tf3, dr3}};
+
+		// top
+		Scene::Transform *tf4 = new Scene::Transform();
+		tf4->name = "spring1";
+		tf4->position = {-20.0f, 28.0f, -0.5f};
+		Scene::Drawable dr4 = new_drawable(burnin_meshes->lookup("Spring"), tf4, this);
+		springs[4] = new Spring{new GameObject{tf4, dr4}};
+
+		// Forest
+		// Bottom
+		Scene::Transform *tf5 = new Scene::Transform();
+		tf5->name = "spring1";
+		tf5->position = {12.0f, -20.0f, -0.5f};
+		Scene::Drawable dr5 = new_drawable(burnin_meshes->lookup("Spring"), tf5, this);
+		springs[5] = new Spring{new GameObject{tf5, dr5}};
+
+		// Bottom
+		Scene::Transform *tf6 = new Scene::Transform();
+		tf6->name = "spring1";
+		tf6->position = {20.0f, 4.0f, -0.5f};
+		Scene::Drawable dr6 = new_drawable(burnin_meshes->lookup("Spring"), tf6, this);
+		springs[6] = new Spring{new GameObject{tf6, dr6}};
+	}
 
 	//get pointer to camera for convenience:
 	if (scene.cameras.size() != 1) throw std::runtime_error("Expecting scene to have exactly one camera, but it has " + std::to_string(scene.cameras.size()));
@@ -688,7 +826,7 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 
 Scene::Drawable PlayMode::new_drawable(Mesh const &mesh, Scene::Transform *tf, PlayMode *pm) {
 	pm->scene.drawables.emplace_back(tf);
-	Scene::Drawable drawable = pm->scene.drawables.back();
+	Scene::Drawable &drawable = pm->scene.drawables.back();
 	drawable.pipeline = lit_color_texture_program_pipeline;
 
 	drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
@@ -804,7 +942,6 @@ void PlayMode::update(float elapsed) {
 
 	//move camera:
 	{
-
 		// combine inputs into a move:
 		constexpr float PlayerSpeed = 30.0f;
 		glm::vec2 move = glm::vec2(0.0f);
@@ -826,58 +963,57 @@ void PlayMode::update(float elapsed) {
 
 	// meteor spawn manager
 	{
-		
+		meteorSpawner->update(elapsed, meteors, this);
 	}
 
 	// // player movement
-	// {
-	// 	if (space.pressed) player.jump();
-	// 	if (!jBtn.pressed && kBtn.pressed) player.charge_brake();
-	// 	if (left.pressed && !right.pressed) player.turn(-1, elapsed);
-	// 	if (!left.pressed && right.pressed) player.turn(1, elapsed);
-	// 	if (jBtn.pressed && !kBtn.pressed) player.accelerate();
-	// }
+	{
+		// if (space.pressed) player.jump();
+		// if (!jBtn.pressed && kBtn.pressed) player.charge_brake();
+		// if (left.pressed && !right.pressed) player.turn(-1, elapsed);
+		// if (!left.pressed && right.pressed) player.turn(1, elapsed);
+		// if (jBtn.pressed && !kBtn.pressed) player.accelerate();
+	}
 
-	// // entity updates
-	// {
-	// 	// add colliders
-	// 	allColliders = {};
-	// 	buildings;
-	// 	trees;
-	// 	springs;
+	// entity updates
+	{
+		// add colliders
+		allColliders = {};
 
-	// 	// player
-	// 	for (ColliderSphere* collider : player->colliders)
-	// 		allColliders.emplace_back(collider);
-	// 	// medal
-	// 	allColliders.emplace_back(theMedal.collider);
+		// player
+		// for (ColliderSphere* collider : player->colliders)
+		// 	allColliders.emplace_back(collider);
+		// medal
+		allColliders.emplace_back(theMedal->collider);
 
-	// 	for (Building building : buildings) {
-	// 		for (ColliderSphere* collider : building->colliders)
-	// 			allColliders.emplace_back(collider);
-	// 	}
-	// 	for (Tree tree : trees) {
-	// 		for (ColliderSphere* collider : tree->colliders)
-	// 			allColliders.emplace_back(collider);
-			
-	// 	}
-	// 	for (Spring spring : springs) {
-	// 		allColliders.emplace_back(spring.collider);
-	// 	}
-	// 	for (Meteor meteor : meteors) {
-	// 		allColliders.emplace_back(meteor.collider);
-	// 	}
+		for (Building *building : buildings) {
+			for (int z = 0; z < 8; z++)
+				for (int y = 0; y < 8; y++)
+					for (int x = 0; x < 8; x++) {
+						allColliders.emplace_back(building->colliders[z][y][x]);
+					}
+		}
+		for (Tree *tree : trees) {
+			for (ColliderSphere* collider : tree->colliders)
+				allColliders.emplace_back(collider);
+		}
+		for (Spring *spring : springs) {
+			allColliders.emplace_back(spring->collider);
+		}
+		for (Meteor *meteor : meteors) {
+			allColliders.emplace_back(meteor->collider);
+		}
 
-	// 	player.update(elapsed, allColliders);
-	// 	theMedal.update(elapsed);
+		// player->update(elapsed, allColliders);
+		// theMedal->update(elapsed);
 
-	// 	for (Spring spring : springs) {
-	// 		spring.update(elapsed)
-	// 	}
-	// 	for (Meteor meteor : meteors) {
-	// 		meteor.update(elapsed, otherColliders);
-	// 	}
-	// }
+		// for (Spring spring : springs) {
+		// 	spring->update(elapsed)
+		// }
+		for (Meteor *meteor : meteors) {
+			meteor->update(elapsed, allColliders, meteors);
+		}
+	}
 
 
 	//reset button press counters:
@@ -910,11 +1046,6 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	glDepthFunc(GL_LESS); //this is the default depth comparison function, but FYI you can change it.
 
 	GL_ERRORS(); //print any errors produced by this setup code
-
-	for (auto iter = scene.drawables.begin(); iter != scene.drawables.end(); iter++) {
-		auto tf = iter->transform;
-		std::cout << tf->name << " (" << tf->position.x << ", " << tf->position.y << ", " << tf->position.z << ")" << std::endl;
-	}
 
 	scene.draw(*camera);
 
