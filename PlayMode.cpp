@@ -16,9 +16,10 @@
 #include <iostream>
 
 const float GROUND_LEVEL = 0.0f;
-// const std::array<std::array<float, 2>, 4> four_corners = {{-32.0f, 32.0f}, {32.0f, 32.0f},
-// 														  {-32.0f, -32.0f}, {32.0f, -32.0f}};
-const std::array<std::array<float, 2>, 4> four_corners = {};
+std::vector<glm::vec2> four_corners = {glm::vec2(-32.0f, 32.0f), glm::vec2(32.0f, 32.0f),
+										  glm::vec2(-32.0f, -32.0f), glm::vec2(32.0f, -32.0f)};
+
+// const std::array<std::array<float, 2>, 4> four_corners = {};
 GLuint burning_meshes_for_lit_color_texture_program = 0;
 
 Load< MeshBuffer > burnin_meshes(LoadTagDefault, []() -> MeshBuffer const * {
@@ -29,17 +30,17 @@ Load< MeshBuffer > burnin_meshes(LoadTagDefault, []() -> MeshBuffer const * {
 
 Load< Scene > burnin_scene(LoadTagDefault, []() -> Scene const * {
 	return new Scene(data_path("burnin.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
-		Mesh const &mesh = burnin_meshes->lookup(mesh_name);
+		// Mesh const &mesh = burnin_meshes->lookup(mesh_name);
 
-		scene.drawables.emplace_back(transform);
-		Scene::Drawable &drawable = scene.drawables.back();
+		// scene.drawables.emplace_back(transform);
+		// Scene::Drawable &drawable = scene.drawables.back();
 
-		drawable.pipeline = lit_color_texture_program_pipeline;
+		// drawable.pipeline = lit_color_texture_program_pipeline;
 
-		drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
-		drawable.pipeline.type = mesh.type;
-		drawable.pipeline.start = mesh.start;
-		drawable.pipeline.count = mesh.count;
+		// drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
+		// drawable.pipeline.type = mesh.type;
+		// drawable.pipeline.start = mesh.start;
+		// drawable.pipeline.count = mesh.count;
 	});
 });
 
@@ -291,32 +292,32 @@ struct Player {
 		// TODO: player->building, player->tree, player->medal, player->ground, player->flame, player->meteor
 		{
 			for (size_t i = 0; i < otherColliders.size(); i++) {
-			ColliderSphere *other = otherColliders[i];
-			std::string otherTag = other->collider_tag;
-			if (otherTag == "building" || otherTag == "tree") {
-				for (ColliderSphere *collider : colliders) {
-					if (collider->collider_test(other)) {
-						// TODO: push back
+				ColliderSphere *other = otherColliders[i];
+				std::string otherTag = other->collider_tag;
+				if (otherTag == "building" || otherTag == "tree") {
+					for (ColliderSphere *collider : colliders) {
+						if (collider->collider_test(other)) {
+							// TODO: push back
+						}
 					}
 				}
-			}
-			else if (otherTag == "medal") {
-				if (collider->collider_test(other)) {
-					// add points, move medal
+				else if (otherTag == "medal") {
 					for (ColliderSphere *collider : colliders) {
-					
+						if (collider->collider_test(other)) {
+							// add points, move medal
+						}
 					}
 				}
-			}
-			else if (otherTag == "medal") {
-				if (collider->collider_test(other)) {
-					// TODO: create flame
+				else if (otherTag == "medal") {
 					for (ColliderSphere *collider : colliders) {
-
+						if (collider->collider_test(other)) {
+							// TODO: create flame
+						}
 					}
 				}
 			}
 		}
+		
 
 		/*********************
 		 * Game Logic Updates
@@ -515,12 +516,22 @@ struct Building {
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	std::array<ColliderSphere*, 512> colliders; // TODO
+	std::vector<std::vector<std::vector<ColliderSphere*>>> colliders = {}; // TODO
 
 	Building(GameObject *obj = nullptr) {
 		gameObject = obj;
-		for (ColliderSphere* collider : colliders)
-			collider->obj = obj;
+		for (int z = 0; z < 8; z++) {
+			colliders.emplace_back();
+			for (int y = 0; y < 8; y++) {
+				colliders[z].emplace_back();
+				for (int x = 0; x < 8; x++) {
+					glm::vec3 sphere_offset = glm::vec3(((x-4) * 2.0f) + 1.0f,
+														((y-4) * 2.0f) + 1.0f,
+														((z-4) * 2.0f) + 1.0f);
+					colliders[z][y].emplace_back(new ColliderSphere{sphere_offset, "building", 1.0f, obj});
+				}
+			}
+		}
 	};
 };
 
@@ -602,7 +613,6 @@ std::vector<ColliderSphere*> allColliders;
 
 // Makes a copy of a scene, in case you want to modify it.
 PlayMode::PlayMode() : scene(*burnin_scene) {
-	std::cout << "scene" << std::endl;
 	//get pointers to leg for convenience:
 	// for (auto &transform : scene.transforms) {
 	// // 	if (transform.name == "Hip.FL") hip = &transform;
@@ -795,23 +805,23 @@ void PlayMode::update(float elapsed) {
 	//move camera:
 	{
 
-		//combine inputs into a move:
-		// constexpr float PlayerSpeed = 30.0f;
-		// glm::vec2 move = glm::vec2(0.0f);
-		// if (left.pressed && !right.pressed) move.x =-1.0f;
-		// if (!left.pressed && right.pressed) move.x = 1.0f;
-		// if (down.pressed && !up.pressed) move.y =-1.0f;
-		// if (!down.pressed && up.pressed) move.y = 1.0f;
+		// combine inputs into a move:
+		constexpr float PlayerSpeed = 30.0f;
+		glm::vec2 move = glm::vec2(0.0f);
+		if (left.pressed && !right.pressed) move.x =-1.0f;
+		if (!left.pressed && right.pressed) move.x = 1.0f;
+		if (down.pressed && !up.pressed) move.y =-1.0f;
+		if (!down.pressed && up.pressed) move.y = 1.0f;
 
-		// //make it so that moving diagonally doesn't go faster:
-		// if (move != glm::vec2(0.0f)) move = glm::normalize(move) * PlayerSpeed * elapsed;
+		//make it so that moving diagonally doesn't go faster:
+		if (move != glm::vec2(0.0f)) move = glm::normalize(move) * PlayerSpeed * elapsed;
 
-		// glm::mat4x3 frame = camera->transform->make_parent_from_local();
-		// glm::vec3 frame_right = frame[0];
-		// //glm::vec3 up = frame[1];
-		// glm::vec3 frame_forward = -frame[2];
+		glm::mat4x3 frame = camera->transform->make_parent_from_local();
+		glm::vec3 frame_right = frame[0];
+		//glm::vec3 up = frame[1];
+		glm::vec3 frame_forward = -frame[2];
 
-		// camera->transform->position += move.x * frame_right + move.y * frame_forward;
+		camera->transform->position += move.x * frame_right + move.y * frame_forward;
 	}
 
 	// meteor spawn manager
@@ -900,6 +910,11 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	glDepthFunc(GL_LESS); //this is the default depth comparison function, but FYI you can change it.
 
 	GL_ERRORS(); //print any errors produced by this setup code
+
+	for (auto iter = scene.drawables.begin(); iter != scene.drawables.end(); iter++) {
+		auto tf = iter->transform;
+		std::cout << tf->name << " (" << tf->position.x << ", " << tf->position.y << ", " << tf->position.z << ")" << std::endl;
+	}
 
 	scene.draw(*camera);
 
