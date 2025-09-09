@@ -19,7 +19,7 @@ struct PlayMode : Mode {
 	virtual void update(float elapsed) override;
 	virtual void draw(glm::uvec2 const &drawable_size) override;
 	
-	std::list<Scene::Drawable>::const_iterator new_drawable(Mesh const &mesh, Scene::Transform *tf, PlayMode *pm);
+	std::list<Scene::Drawable>::iterator new_drawable(Mesh const &mesh, Scene::Transform *tf, PlayMode *pm);
 
 	//----- game state -----
 
@@ -29,7 +29,7 @@ struct PlayMode : Mode {
 		uint8_t pressed = 0;
 	} left, right, down, up, space, jBtn;
 
-	struct Player;
+	// struct Player;
 
 	//local copy of the game scene (so code can change it during gameplay):
 	Scene scene;

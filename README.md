@@ -1,8 +1,8 @@
 # Rubbapocalypse!
 
-Author: (TODO: your name)
+Author: Kenechukwu Echezona
 
-Design: (TODO: In two sentences or fewer, describe what is new and interesting about your game.)
+Design: An arcade game where you roll around, avoid meteors, and collect medals to raise your score multiplier.
 
 Screen Shot:
 
