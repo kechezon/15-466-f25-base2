@@ -13,8 +13,8 @@ How To Play:
 (TODO: describe the controls and (if needed) goals/strategy.)
 Controls:
 - A/D: Turn counterclockwise/clockwise
-- J: Accelerate
-- K: Brake Charge (hold for ~2 seconds to release a Boost)
+- W: Accelerate
+- J: Brake Charge (hold for ~2 seconds to release a Boost)
 - Space: Jump
 
 Goal:

@@ -15,6 +15,7 @@
 #include <numbers>
 #include <iostream>
 #include <cstdlib>
+#include <ctime>
 
 const float GROUND_LEVEL = 0.0f;
 std::vector<glm::vec2> four_corners = {glm::vec2(-32.0f, 32.0f), glm::vec2(32.0f, 32.0f),
@@ -53,7 +54,7 @@ struct GameObject {
 
 	// the actual object (will be reset to apply anim animations)
 	Scene::Transform *transform;
-	Scene::Drawable &drawable;
+	std::list<Scene::Drawable>::const_iterator &drawable;
 
 	glm::vec3 transform_forward() {
 		// std::cout << (transform->rotation * glm::vec3(0.0f, 1.0f, 0.0f)) << std::endl;
@@ -116,7 +117,7 @@ struct SquetchearAnimator {
  * Specific game entities
  *************************/
 
-// TODO: Collisions and animations
+// TODO: Animations
 struct Player {
 	// to initialize
 	GameObject *gameObject;
@@ -126,6 +127,7 @@ struct Player {
 											   new ColliderSphere{{0.5f, 0.5f, 0}, "player", 1}};
 	PhysicsObject *physicsObject = new PhysicsObject{{0, 0, 0}, {0, 0, -9.81f}, 1};
 	SquetchearAnimator *animator = nullptr; // TODO
+	std::list<Scene::Drawable>::const_iterator drop_shadow;
 
 	/*******************
 	 * Game Rules Logic
@@ -134,6 +136,7 @@ struct Player {
 	float SCORE_GAIN = 100; // 100 points per second of driving
 	float multiplier = 1;
 	float MULTIPLIER_GAIN = 1; // adds this to multiplier every time a medal is collected
+	float MAX_MULTIPLIER = 8;
 	float COMBO_DURATION = 10; // if you don't collect a new medal in this time, the multiplier resets
 	float comboTimer = 0;
 
@@ -214,6 +217,7 @@ struct Player {
 	};
 
 	void charge_brake(float t) {
+		boostTimer = 0;
 		glm::vec3 *velocity = &(physicsObject->velocity);
 
 		// slow down and charge
@@ -245,7 +249,6 @@ struct Player {
 	};
 
 	bool spring_jump (ColliderSphere *springBox, float strength) { // units per second
-		// TODO
 		if (springBox == lastSpring) return false;
 		physicsObject->velocity.z += strength;
 		airborne = true;
@@ -290,7 +293,7 @@ struct Player {
 		/******************
 		 * Collision logic
 		 ******************/
-		// TODO: player->building, player->tree, player->medal, player->ground, player->flame, player->meteor
+		// player->building, player->tree, player->medal, player->ground, player->flame, player->meteor
 		{
 			for (size_t i = 0; i < otherColliders.size(); i++) {
 				ColliderSphere *other = otherColliders[i];
@@ -298,21 +301,43 @@ struct Player {
 				if (otherTag == "building" || otherTag == "tree") {
 					for (ColliderSphere *collider : colliders) {
 						if (collider->collider_test(other)) {
-							// TODO: push back
+							glm::vec3 motion = ((other->obj->transform->position + other->offset) -
+												(gameObject->transform->position + collider->offset));
+							float magnitude = std::sqrtf((motion.x * motion.x) + (motion.y * motion.y) + (motion.z * motion.z));
+							float pushback = collider->radius + other->radius - magnitude;
+							gameObject->transform->position -= glm::normalize(motion) * pushback;
 						}
 					}
 				}
 				else if (otherTag == "medal") {
 					for (ColliderSphere *collider : colliders) {
 						if (collider->collider_test(other)) {
-							// add points, move medal
+							multiplier += MULTIPLIER_GAIN;
+							comboTimer = COMBO_DURATION;
 						}
 					}
 				}
-				else if (otherTag == "medal") {
+				else if (otherTag == "meteor") {
 					for (ColliderSphere *collider : colliders) {
 						if (collider->collider_test(other)) {
-							// TODO: create flame
+							health -= METEOR_DAMAGE;
+							break;
+						}
+					}
+				}
+				else if (otherTag == "flame") {
+					for (ColliderSphere *collider : colliders) {
+						if (collider->collider_test(other)) {
+							health -= FLAME_DPS * t;
+							break;
+						}
+					}
+				}
+				else if (otherTag == "spring") {
+					for (ColliderSphere *collider : colliders) {
+						if (collider->collider_test(other)) {
+							spring_jump(other, 20.0f);
+							break;
 						}
 					}
 				}
@@ -354,13 +379,11 @@ struct Player {
 };
 
 struct Flame {
-	// TODO
-
 	/**********
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "flame", 1}; // TODO
+	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "flame", 1};
 
 	/*************
 	 * Base Logic
@@ -389,9 +412,9 @@ struct Flame {
 			Scene::Transform *tf = new Scene::Transform();
 			tf->name = "flame";
 			tf->position = spawnOffset;
-			Scene::Drawable dr = (pm->new_drawable(burnin_meshes->lookup("Flame"), tf, pm));
+			std::list<Scene::Drawable>::const_iterator dr = (pm->new_drawable(burnin_meshes->lookup("Flame"), tf, pm));
 			
-			Flame *childFlame = new Flame{new GameObject{tf, dr}, spawnLevel - 1, spawnDirection};
+			Flame *childFlame = new Flame(new GameObject{tf, dr}, spawnLevel - 1, spawnDirection);
 			childFlame->spread(pm);
 		}
 	};
@@ -403,21 +426,20 @@ struct Flame {
 		if (burnTimer > 0)
 			burnTimer = std::clamp(burnTimer - t, 0.0f, BURN_DURATION);
 		else {
-			// TODO destroy self
-			// pm->scene.drawables.remove(const gameObject->drawable);
+			// destroy self
+			pm->scene.drawables.erase(gameObject->drawable);
 			free(gameObject);
 			free(collider);
 		}
-		// TODO
 	};
 };
+std::list<Flame*> flames;
 
-// TODO: Collisions
 struct Meteor {
 	GameObject *gameObject;
 	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "meteor", 1.8f};
 	PhysicsObject *physicsObject = new PhysicsObject{{0, 0, -20.0f}};
-	bool exploded = false;
+	std::list<Scene::Drawable>::const_iterator drop_shadow;
 
 	float SPEED = -20;
 
@@ -426,7 +448,37 @@ struct Meteor {
 		collider->obj = obj;
 	};
 
-	void update(float t, std::vector<ColliderSphere*> otherColliders, std::list<Meteor*> meteor_list) {
+	void create_flames(PlayMode *pm) {
+		Scene::Transform *tf0 = new Scene::Transform();
+		tf0->name = "flame";
+		tf0->position = gameObject->transform->position;
+		std::list<Scene::Drawable>::const_iterator dr0 = pm->new_drawable(burnin_meshes->lookup("Flame"), tf0, pm);
+		Flame *upFlame = new Flame(new GameObject{tf0, dr0}, 8, glm::vec3(0.0f, 1.0f, 0.0f));
+		flames.emplace_back(upFlame);
+
+		Scene::Transform *tf1 = new Scene::Transform();
+		tf1->name = "flame";
+		tf1->position = gameObject->transform->position;
+		std::list<Scene::Drawable>::const_iterator dr1 = pm->new_drawable(burnin_meshes->lookup("Flame"), tf1, pm);
+		Flame *rightFlame = new Flame(new GameObject{tf1, dr1}, 8, glm::vec3(1.0f, 0.0f, 0.0f));
+		flames.emplace_back(rightFlame);
+
+		Scene::Transform *tf2 = new Scene::Transform();
+		tf2->name = "flame";
+		tf2->position = gameObject->transform->position;
+		std::list<Scene::Drawable>::const_iterator dr2 = pm->new_drawable(burnin_meshes->lookup("Flame"), tf2, pm);
+		Flame *downFlame = new Flame(new GameObject{tf2, dr2}, 8, glm::vec3(0.0f, -1.0f, 0.0f));
+		flames.emplace_back(downFlame);
+
+		Scene::Transform *tf3 = new Scene::Transform();
+		tf3->name = "flame";
+		tf3->position = gameObject->transform->position;
+		std::list<Scene::Drawable>::const_iterator dr3 = pm->new_drawable(burnin_meshes->lookup("Flame"), tf3, pm);
+		Flame *leftFlame = new Flame(new GameObject{tf1, dr1}, 8, glm::vec3(-1.0f, 0.0f, 0.0f));
+		flames.emplace_back(leftFlame);
+	};
+
+	void update(float t, std::vector<ColliderSphere*> otherColliders, std::list<Meteor*> meteor_list, PlayMode *pm) {
 		/******************
 		 * Physics updates
 		 ******************/
@@ -434,44 +486,84 @@ struct Meteor {
 		// *velocity += glm::vec3(0.0f, 0.0f, SPEED);
 		gameObject->transform->position += (*velocity) * t;
 
-		if (!exploded) std::cout << gameObject->transform->position.z << std::endl;
-
 		/******************
 		 * Collision logic
 		 ******************/
-		if (!exploded && gameObject->transform->position.z <= GROUND_LEVEL + collider->radius) {
-			std::cout << "Hit the ground at " << gameObject->transform->position.z << " compared to " << (GROUND_LEVEL + collider->radius) << "!" << std::endl;
-			// TODO: destroy
-			exploded = true;
+		if (gameObject->transform->position.z <= GROUND_LEVEL + collider->radius) {
+			// create flames
+			create_flames(pm);
+			pm->scene.drawables.erase(drop_shadow);
+			pm->scene.drawables.erase(gameObject->drawable);
+
+			for (auto iter = meteor_list.cbegin(); iter != meteor_list.cend(); iter++) {
+				if (this == *iter) {
+					meteor_list.erase(iter);
+					break;
+				}
+			}
+
+			free(gameObject->transform);
+			free(gameObject);
+			free(physicsObject);
+			printf("hrm");
 		}
 
-		// TODO: meteor->building, meteor->tree, meteor->ground
+		// meteor->building, meteor->tree, meteor->ground
 		for (size_t i = 0; i < otherColliders.size(); i++) {
 			ColliderSphere *other = otherColliders[i];
 			std::string otherTag = other->collider_tag;
-			if (otherTag == "building" || otherTag == "tree") {
+			if (otherTag == "building" || otherTag == "tree" || otherTag == "player") {
 				if (collider->collider_test(other)) {
-					// TODO: create flames, destroy myself, remove from meteors
-					std::cout << "Hit! at " << otherTag << gameObject->transform->position.z << std::endl;
+					// create flames, destroy self, remove from meteors
+					create_flames(pm);
+					pm->scene.drawables.erase(gameObject->drawable);
+					free(gameObject->transform);
+					free(gameObject);
+					free(physicsObject);
+
+					for (auto iter = meteor_list.cbegin(); iter != meteor_list.cend(); iter++) {
+						if (this == *iter) {
+							meteor_list.erase(iter);
+							break;
+						}
+					}
 				}
 			}
 			else if (otherTag == "player") {
 				if (collider->collider_test(other)) {
-					// TODO: create flames
+					// create flames
+					create_flames(pm);
+
+					// remove me
+					pm->scene.drawables.erase(gameObject->drawable);
+
+					free(gameObject->transform);
+					free(gameObject);
+					free(physicsObject);
+					for (auto iter = meteor_list.cbegin(); iter != meteor_list.cend(); iter++) {
+						if (this == *iter) {
+							meteor_list.erase(iter);
+							break;
+						}
+					}
 				}
 			}
 		}
 	};
 };
 
-struct Medal {
-	// TODO
+std::array<glm::vec3, 8> medalSpawnPositions = {glm::vec3(0, 4, 2), glm::vec3(0, -4, 2),
+												glm::vec3(-28, -4, 10), glm::vec3(-12, -12, 18), glm::vec3(-24, 24, 2),
+												glm::vec3(8, -16, 2), glm::vec3(24, 20, 2), glm::vec3(28, -20, 2)};
 
+struct Medal {
 	/**********
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "medal", 0.9f};; // TODO
+	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "medal", 0.9f};
+	int currentIdx = 0;
+	std::list<Scene::Drawable>::const_iterator drop_shadow;
 
 	/*********************
 	 * Spinning Animation
@@ -483,7 +575,29 @@ struct Medal {
 		collider->obj = obj;
 	};
 
-	void update(float t) {
+	void update(float t, std::vector<ColliderSphere*> otherColliders) {
+		/*************
+		 * Collisions
+		 *************/
+		for (size_t i = 0; i < otherColliders.size(); i++) {
+			ColliderSphere *other = otherColliders[i];
+			std::string otherTag = other->collider_tag;
+			if (otherTag == "player") {
+				if (collider->collider_test(other)) {
+					// move somewhere else
+					// index generation courtesy of
+					// https://www.w3schools.com/cpp/cpp_howto_random_number.asp
+					int newIdx;
+					do {
+						std::srand((unsigned int)time(0));
+						newIdx = std::rand() % 8;
+					} while (newIdx != currentIdx);
+					currentIdx = newIdx;
+					gameObject->transform->position = medalSpawnPositions[currentIdx];
+				}
+			}
+		}
+
 		/************
 		 * Animation
 		 ************/
@@ -492,32 +606,62 @@ struct Medal {
 };
 
 struct Spring {
-	// TODO
-
-	/************
-	 * Animation
-	 ************/
-	float SHOOT_TIME = 0.1f;
-	float SINK_TIME = 0.9f;
-	float shootTimer = 0.0f;
-	float sinkTimer = 0.0f;
-
 	/**********
 	 * Structs
 	 **********/
 	GameObject *gameObject;
-	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "spring", 1.5f}; // TODO
+	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "spring", 1.5f};
+
+	/************
+	 * Animation
+	 ************/
+	enum SpringState {
+		resting = 0b001,
+		shooting = 0b010,
+		sinking = 0b100
+	} springState = resting;
+	float SHOOT_TIME = 0.1f;
+	float SINK_TIME = 0.9f;
+	float shootTimer = 0.0f;
+	float sinkTimer = 0.0f;
 
 	Spring(GameObject *obj = nullptr) {
 		gameObject = obj;
 		collider->obj = obj;
 	};
 
-	void update(float t) {
-		/************
-		 * Animation
-		 ************/
-		// TODO
+	void update(float t, std::vector<ColliderSphere*> otherColliders) {
+		for (size_t i = 0; i < otherColliders.size(); i++) {
+			ColliderSphere *other = otherColliders[i];
+			std::string otherTag = other->collider_tag;
+			if (otherTag == "player") {
+				if (collider->collider_test(other) && springState == resting) {
+					shootTimer = SHOOT_TIME;
+					springState = shooting;
+				}
+			}
+		}
+
+		/**********************
+		 * Logic and Animation
+		 * TODO: Animation
+		 **********************/
+		switch (springState) {
+			case shooting:
+				if (shootTimer <= 0) {
+					springState = sinking;
+					sinkTimer = SINK_TIME;
+				}
+				else
+					shootTimer = std::clamp(shootTimer - t, 0.0f, SHOOT_TIME);
+				break;
+			case sinking:
+				if (sinkTimer <= 0) springState = resting;
+				else sinkTimer = std::clamp(sinkTimer - t, 0.0f, SINK_TIME);
+				break;
+			default:
+				break;
+		}
 	};
 };
 
@@ -553,6 +697,8 @@ struct Tree {
 	std::array<ColliderSphere*, 3> colliders = {new ColliderSphere{{0, 0, -3}, "tree", 1.5f},
 												new ColliderSphere{{0, 0, 0}, "tree", 1.5f},
 												new ColliderSphere{{0, 0, 3}, "tree", 1.5f}};
+	std::list<Scene::Drawable>::const_iterator drop_shadow;
+
 
 	Tree(GameObject *obj = nullptr) {
 		gameObject = obj;
@@ -577,8 +723,8 @@ struct MeteorSpawner {
 	/************
 	 * Timer Data
 	 ************/
-	float SPAWN_TIME = 2;
-	float SPAWN_HEIGHT = 20;
+	float SPAWN_TIME = 30;
+	float SPAWN_HEIGHT = 30;
 	float spawnTimer = 0;
 
 	void update(float t, std::list<Meteor*> &meteor_list, PlayMode *pm) {
@@ -592,10 +738,17 @@ struct MeteorSpawner {
 			tf->position = glm::vec3(-30.0f + (62.0f * ((float)std::rand()) / ((float)RAND_MAX)),
 									 -30.0f + (62.0f * ((float)std::rand()) / ((float)RAND_MAX)), SPAWN_HEIGHT);
 			// tf->rotation = glm::quat(1.0f, std::numbers::pi_v<float> / 4.0f, 0.0f, 0.0f);
-			Scene::Drawable dr = pm->new_drawable(burnin_meshes->lookup("Meteor"), tf, pm);
+			std::list<Scene::Drawable>::const_iterator dr = pm->new_drawable(burnin_meshes->lookup("Meteor"), tf, pm);
 			Meteor *meteor = new Meteor{new GameObject{tf, dr}};
+			
+			Scene::Transform *tf_ds = new Scene::Transform();
+			tf_ds->name = "meteor_shadow";
+			tf_ds->position = {tf->position.x, tf->position.y, 0.1f};
+			tf_ds->scale = {4.0f, 4.0f, 1.0f};
+			std::list<Scene::Drawable>::const_iterator dr_ds = pm->new_drawable(burnin_meshes->lookup("Shadow"), tf_ds, pm);
+			meteor->drop_shadow = dr_ds;
+
 			meteor_list.emplace_back(meteor);
-			std::cout << "Spawned! " << meteor_list.size() << std::endl;
 			spawnTimer += SPAWN_TIME;
 		}
 
@@ -617,39 +770,12 @@ std::array<Spring*, 7> springs;
 
 // Medals and Meteors (procedurally generated)
 Medal *theMedal;
-std::array<glm::vec3, 8> medalSpawnPositions = {glm::vec3(0, 4, 2), glm::vec3(0, -4, 2),
-												glm::vec3(-28, -4, 10), glm::vec3(-12, -12, 18), glm::vec3(-24, 24, 2),
-												glm::vec3(8, -16, 2), glm::vec3(24, 20, 2), glm::vec3(28, -20, 2)};
 std::list<Meteor*> meteors;
 
 // Player
 Player *player;
 
 std::vector<ColliderSphere*> allColliders;
-
-// TODO: Figure this out lol
-// Load< MeshBuffer > hexapod_meshes(LoadTagDefault, []() -> MeshBuffer const * {
-// 	MeshBuffer const *ret = new MeshBuffer(data_path("hexapod.pnct"));
-// 	hexapod_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
-// 	return ret;
-// });
-
-// Load< Scene > hexapod_scene(LoadTagDefault, []() -> Scene const * {
-// 	return new Scene(data_path("hexapod.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
-// 		Mesh const &mesh = hexapod_meshes->lookup(mesh_name);
-
-// 		scene.drawables.emplace_back(transform);
-// 		Scene::Drawable &drawable = scene.drawables.back();
-
-// 		drawable.pipeline = lit_color_texture_program_pipeline;
-
-// 		drawable.pipeline.vao = burning_meshes_for_lit_color_texture_program;
-// 		drawable.pipeline.type = mesh.type;
-// 		drawable.pipeline.start = mesh.start;
-// 		drawable.pipeline.count = mesh.count;
-
-// 	});
-// });
 
 // Makes a copy of a scene, in case you want to modify it.
 PlayMode::PlayMode() : scene(*burnin_scene) {
@@ -675,7 +801,7 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 		// Scene::Transform *tf = new Scene::Transform();
 		// tf->name = "player";
 		// tf->position = {0.0f, 0.0f, 1.0f};
-		// Scene::Drawable dr = new_drawable(burnin_meshes->lookup("Tireler"), tf, this);
+		// std::list<Scene::Drawable>::const_iterator dr = new_drawable(burnin_meshes->lookup("Tireler"), tf, this);
 		// ground->gameObject = new GameObject{tf, dr};
 	}
 
@@ -684,8 +810,16 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 		Scene::Transform *tf = new Scene::Transform();
 		tf->name = "medal";
 		tf->position = {0.0f, 0.0f, 1.0f};
-		Scene::Drawable dr = new_drawable(burnin_meshes->lookup("Medal"), tf, this);
+		std::list<Scene::Drawable>::const_iterator dr = new_drawable(burnin_meshes->lookup("Medal"), tf, this);
+
+		Scene::Transform *tf_ds = new Scene::Transform();
+		tf_ds->name = "medal_shadow";
+		tf_ds->position = {0.0f, 0.0f, 0.1f};
+		tf_ds->scale = {0.9f, 0.9f, 1.0f};
+		std::list<Scene::Drawable>::const_iterator dr_ds = new_drawable(burnin_meshes->lookup("Shadow"), tf_ds, this);
+
 		theMedal = new Medal(new GameObject{tf, dr});
+		theMedal->drop_shadow = dr_ds;
 	}
 
 	// Ground
@@ -693,7 +827,7 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 		Scene::Transform *tf = new Scene::Transform();
 		tf->name = "ground";
 		tf->position = {0.0f, 0.0f, -1.0f};
-		Scene::Drawable dr = new_drawable(burnin_meshes->lookup("Ground"), tf, this);
+		std::list<Scene::Drawable>::const_iterator dr = new_drawable(burnin_meshes->lookup("Ground"), tf, this);
 		ground->gameObject = new GameObject{tf, dr};
 	}
 
@@ -705,42 +839,42 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 		Scene::Transform *tf0 = new Scene::Transform();
 		tf0->name = "building0";
 		tf0->position = {-12.0f, -12.0f, 4.0f};
-		Scene::Drawable dr0 = new_drawable(burnin_meshes->lookup("Building"), tf0, this);
+		std::list<Scene::Drawable>::const_iterator dr0 = new_drawable(burnin_meshes->lookup("Building"), tf0, this);
 		buildings[0] = new Building{new GameObject{tf0, dr0}};
 
 		// bottom left
 		Scene::Transform *tf1 = new Scene::Transform();
 		tf1->name = "building1";
 		tf1->position = {-20.0f, -12.0f, 4.0f};
-		Scene::Drawable dr1 = new_drawable(burnin_meshes->lookup("Building"), tf1, this);
+		std::list<Scene::Drawable>::const_iterator dr1 = new_drawable(burnin_meshes->lookup("Building"), tf1, this);
 		buildings[1] = new Building{new GameObject{tf1, dr1}};
 
 		// middle left down
 		Scene::Transform *tf2 = new Scene::Transform();
 		tf2->name = "building2";
 		tf2->position = {-28.0f, 8.0f, 4.0f};
-		Scene::Drawable dr2 = new_drawable(burnin_meshes->lookup("Building"), tf2, this);
+		std::list<Scene::Drawable>::const_iterator dr2 = new_drawable(burnin_meshes->lookup("Building"), tf2, this);
 		buildings[2] = new Building{new GameObject{tf2, dr2}};
 
 		// middle left up
 		Scene::Transform *tf3 = new Scene::Transform();
 		tf3->name = "building3";
 		tf3->position = {-28.0f, 12.0f, 4.0f};
-		Scene::Drawable dr3 = new_drawable(burnin_meshes->lookup("Building"), tf3, this);
+		std::list<Scene::Drawable>::const_iterator dr3 = new_drawable(burnin_meshes->lookup("Building"), tf3, this);
 		buildings[3] = new Building{new GameObject{tf3, dr3}};
 
 		// top right (ground floor)
 		Scene::Transform *tf4 = new Scene::Transform();
 		tf4->name = "building4";
 		tf4->position = {-12.0f, 20.0f, 4.0f};
-		Scene::Drawable dr4 = new_drawable(burnin_meshes->lookup("Building"), tf4, this);
+		std::list<Scene::Drawable>::const_iterator dr4 = new_drawable(burnin_meshes->lookup("Building"), tf4, this);
 		buildings[4] = new Building{new GameObject{tf4, dr4}};
 
 		// top right (upper floor)
 		Scene::Transform *tf5 = new Scene::Transform();
 		tf5->name = "building5";
 		tf5->position = {-12.0f, 20.0f, 12.0f};
-		Scene::Drawable dr5 = new_drawable(burnin_meshes->lookup("Building"), tf5, this);
+		std::list<Scene::Drawable>::const_iterator dr5 = new_drawable(burnin_meshes->lookup("Building"), tf5, this);
 		buildings[5] = new Building{new GameObject{tf5, dr5}};
 	}
 
@@ -749,20 +883,41 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 		Scene::Transform *tf0 = new Scene::Transform();
 		tf0->name = "tree0";
 		tf0->position = {12.0f, 20.0f, 4.5f};
-		Scene::Drawable dr0 = new_drawable(burnin_meshes->lookup("Tree"), tf0, this);
+		std::list<Scene::Drawable>::const_iterator dr0 = new_drawable(burnin_meshes->lookup("Tree"), tf0, this);
+
+		Scene::Transform *tf0_ds = new Scene::Transform();
+		tf0_ds->name = "tree_shadow";
+		tf0_ds->position = {12.0f, 20.0f, 0.1f};
+		tf0_ds->scale = {3.0f, 3.0f, 1.0f};
+		std::list<Scene::Drawable>::const_iterator dr0_ds = new_drawable(burnin_meshes->lookup("Shadow"), tf0_ds, this);
 		trees[0] = new Tree{new GameObject{tf0, dr0}};
+		trees[0]->drop_shadow = dr0_ds;
 
 		Scene::Transform *tf1 = new Scene::Transform();
 		tf1->name = "tree1";
 		tf1->position = {20.0f, -20.0f, 4.5f};
-		Scene::Drawable dr1 = new_drawable(burnin_meshes->lookup("Tree"), tf1, this);
+		std::list<Scene::Drawable>::const_iterator dr1 = new_drawable(burnin_meshes->lookup("Tree"), tf1, this);
+
+		Scene::Transform *tf1_ds = new Scene::Transform();
+		tf1_ds->name = "tree_shadow";
+		tf1_ds->position = {20.0f, -20.0f, 0.1f};
+		tf1_ds->scale = {3.0f, 3.0f, 1.0f};
+		std::list<Scene::Drawable>::const_iterator dr1_ds = new_drawable(burnin_meshes->lookup("Shadow"), tf1_ds, this);
 		trees[1] = new Tree{new GameObject{tf1, dr1}};
+		trees[1]->drop_shadow = dr1_ds;
 
 		Scene::Transform *tf2 = new Scene::Transform();
 		tf2->name = "tree2";
 		tf2->position = {8.0f, -8.0f, 4.5f};
-		Scene::Drawable dr2 = new_drawable(burnin_meshes->lookup("Tree"), tf2, this);
+		std::list<Scene::Drawable>::const_iterator dr2 = new_drawable(burnin_meshes->lookup("Tree"), tf2, this);
+
+		Scene::Transform *tf2_ds = new Scene::Transform();
+		tf2_ds->name = "tree_shadow";
+		tf2_ds->position = {8.0f, -8.0f, 0.1f};
+		tf2_ds->scale = {3.0f, 3.0f, 1.0f};
+		std::list<Scene::Drawable>::const_iterator dr2_ds = new_drawable(burnin_meshes->lookup("Shadow"), tf2_ds, this);
 		trees[2] = new Tree{new GameObject{tf2, dr2}};
+		trees[2]->drop_shadow = dr2_ds;
 	}
 
 	// Springs
@@ -772,35 +927,35 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 		Scene::Transform *tf0 = new Scene::Transform();
 		tf0->name = "spring0";
 		tf0->position = {-12.0f, -20.0f, -0.5f};
-		Scene::Drawable dr0 = new_drawable(burnin_meshes->lookup("Spring"), tf0, this);
+		std::list<Scene::Drawable>::const_iterator dr0 = new_drawable(burnin_meshes->lookup("Spring"), tf0, this);
 		springs[0] = new Spring{new GameObject{tf0, dr0}};
 
 		// Bottom left
 		Scene::Transform *tf1 = new Scene::Transform();
 		tf1->name = "spring1";
 		tf1->position = {-20.0f, -12.0f, 7.5f};
-		Scene::Drawable dr1 = new_drawable(burnin_meshes->lookup("Spring"), tf1, this);
+		std::list<Scene::Drawable>::const_iterator dr1 = new_drawable(burnin_meshes->lookup("Spring"), tf1, this);
 		springs[1] = new Spring{new GameObject{tf1, dr1}};
 
 		// middle left
 		Scene::Transform *tf2 = new Scene::Transform();
 		tf2->name = "spring1";
 		tf2->position = {-26.0f, 12.0f, 7.5f};
-		Scene::Drawable dr2 = new_drawable(burnin_meshes->lookup("Spring"), tf2, this);
+		std::list<Scene::Drawable>::const_iterator dr2 = new_drawable(burnin_meshes->lookup("Spring"), tf2, this);
 		springs[2] = new Spring{new GameObject{tf2, dr2}};
 
 		// middle right
 		Scene::Transform *tf3 = new Scene::Transform();
 		tf3->name = "spring1";
 		tf3->position = {-12.0f, 18.0f, 15.5f};
-		Scene::Drawable dr3 = new_drawable(burnin_meshes->lookup("Spring"), tf3, this);
+		std::list<Scene::Drawable>::const_iterator dr3 = new_drawable(burnin_meshes->lookup("Spring"), tf3, this);
 		springs[3] = new Spring{new GameObject{tf3, dr3}};
 
 		// top
 		Scene::Transform *tf4 = new Scene::Transform();
 		tf4->name = "spring1";
 		tf4->position = {-20.0f, 28.0f, -0.5f};
-		Scene::Drawable dr4 = new_drawable(burnin_meshes->lookup("Spring"), tf4, this);
+		std::list<Scene::Drawable>::const_iterator dr4 = new_drawable(burnin_meshes->lookup("Spring"), tf4, this);
 		springs[4] = new Spring{new GameObject{tf4, dr4}};
 
 		// Forest
@@ -808,14 +963,14 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 		Scene::Transform *tf5 = new Scene::Transform();
 		tf5->name = "spring1";
 		tf5->position = {12.0f, -20.0f, -0.5f};
-		Scene::Drawable dr5 = new_drawable(burnin_meshes->lookup("Spring"), tf5, this);
+		std::list<Scene::Drawable>::const_iterator dr5 = new_drawable(burnin_meshes->lookup("Spring"), tf5, this);
 		springs[5] = new Spring{new GameObject{tf5, dr5}};
 
 		// Bottom
 		Scene::Transform *tf6 = new Scene::Transform();
 		tf6->name = "spring1";
 		tf6->position = {20.0f, 4.0f, -0.5f};
-		Scene::Drawable dr6 = new_drawable(burnin_meshes->lookup("Spring"), tf6, this);
+		std::list<Scene::Drawable>::const_iterator dr6 = new_drawable(burnin_meshes->lookup("Spring"), tf6, this);
 		springs[6] = new Spring{new GameObject{tf6, dr6}};
 	}
 
@@ -824,7 +979,7 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 	camera = &scene.cameras.front();
 }
 
-Scene::Drawable PlayMode::new_drawable(Mesh const &mesh, Scene::Transform *tf, PlayMode *pm) {
+std::list<Scene::Drawable>::const_iterator PlayMode::new_drawable(Mesh const &mesh, Scene::Transform *tf, PlayMode *pm) {
 	pm->scene.drawables.emplace_back(tf);
 	Scene::Drawable &drawable = pm->scene.drawables.back();
 	drawable.pipeline = lit_color_texture_program_pipeline;
@@ -833,8 +988,9 @@ Scene::Drawable PlayMode::new_drawable(Mesh const &mesh, Scene::Transform *tf, P
 	drawable.pipeline.type = mesh.type;
 	drawable.pipeline.start = mesh.start;
 	drawable.pipeline.count = mesh.count;
+	drawable.transform = tf;
 
-	return drawable;
+	return pm->scene.drawables.cend();
 }
 
 PlayMode::~PlayMode() {
@@ -861,20 +1017,16 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 		} else if (evt.key.key == SDLK_S) {
 			down.downs += 1;
 			down.pressed = true;
-			return true; }
-		// } else if (evt.key.key == SDLK_J) {
-		// 	jBtn.downs += 1;
-		// 	jBtn.pressed = true;
-		// 	return true;
-		// } else if (evt.key.key == SDLK_K) {
-		// 	kBtn.downs += 1;
-		// 	kBtn.pressed = true;
-		// 	return true;
-		// } else if (evt.key.key == SDLK_SPACE) {
-		// 	space.downs += 1;
-		// 	space.pressed = true;
-		// 	return true;
-		// }
+			return true;
+		} else if (evt.key.key == SDLK_J) {
+			jBtn.downs += 1;
+			jBtn.pressed = true;
+			return true;
+		} else if (evt.key.key == SDLK_SPACE) {
+			space.downs += 1;
+			space.pressed = true;
+			return true;
+		}
 	} else if (evt.type == SDL_EVENT_KEY_UP) {
 		if (evt.key.key == SDLK_A) {
 			left.pressed = false;
@@ -887,17 +1039,14 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 			return true;
 		} else if (evt.key.key == SDLK_S) {
 			down.pressed = false;
-			return true;}
-		// } else if (evt.key.key == SDLK_J) {
-		// 	jBtn.pressed = false;
-		// 	return true;
-		// } else if (evt.key.key == SDLK_K) {
-		// 	kBtn.pressed = false;
-		// 	return true;
-		// } else if (evt.key.key == SDLK_SPACE) {
-		// 	space.pressed = false;
-		// 	return true;
-		// }
+			return true;
+		} else if (evt.key.key == SDLK_J) {
+			jBtn.pressed = false;
+			return true;
+		} else if (evt.key.key == SDLK_SPACE) {
+			space.pressed = false;
+			return true;
+		}
 	} else if (evt.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
 		if (SDL_GetWindowRelativeMouseMode(Mode::window) == false) {
 			SDL_SetWindowRelativeMouseMode(Mode::window, true);
@@ -1011,7 +1160,10 @@ void PlayMode::update(float elapsed) {
 		// 	spring->update(elapsed)
 		// }
 		for (Meteor *meteor : meteors) {
-			meteor->update(elapsed, allColliders, meteors);
+			meteor->update(elapsed, allColliders, meteors, this);
+		}
+		for (Flame *flame : flames) {
+			flame->update(elapsed, allColliders, this);
 		}
 	}
 
@@ -1021,9 +1173,8 @@ void PlayMode::update(float elapsed) {
 	right.downs = 0;
 	up.downs = 0;
 	down.downs = 0;
-	// space.downs = 0;
-	// jBtn.downs = 0;
-	// kBtn.downs = 0;
+	space.downs = 0;
+	jBtn.downs = 0;
 }
 
 void PlayMode::draw(glm::uvec2 const &drawable_size) {
