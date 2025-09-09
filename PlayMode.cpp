@@ -440,6 +440,7 @@ struct Meteor {
 	ColliderSphere *collider = new ColliderSphere{{0, 0, 0}, "meteor", 1.8f};
 	PhysicsObject *physicsObject = new PhysicsObject{{0, 0, -20.0f}};
 	std::list<Scene::Drawable>::const_iterator drop_shadow;
+	bool exploded = false;
 
 	float SPEED = -20;
 
@@ -474,16 +475,20 @@ struct Meteor {
 		tf3->name = "flame";
 		tf3->position = gameObject->transform->position;
 		std::list<Scene::Drawable>::const_iterator dr3 = pm->new_drawable(burnin_meshes->lookup("Flame"), tf3, pm);
-		Flame *leftFlame = new Flame(new GameObject{tf1, dr1}, 8, glm::vec3(-1.0f, 0.0f, 0.0f));
+		Flame *leftFlame = new Flame(new GameObject{tf3, dr3}, 8, glm::vec3(-1.0f, 0.0f, 0.0f));
 		flames.emplace_back(leftFlame);
+
+		upFlame->spread(pm);
+		rightFlame->spread(pm);
+		leftFlame->spread(pm);
+		downFlame->spread(pm);
 	};
 
-	void update(float t, std::vector<ColliderSphere*> otherColliders, std::list<Meteor*> meteor_list, PlayMode *pm) {
+	bool update(float t, std::vector<ColliderSphere*> otherColliders, PlayMode *pm) {
 		/******************
 		 * Physics updates
 		 ******************/
 		glm::vec3 *velocity = &(physicsObject->velocity);
-		// *velocity += glm::vec3(0.0f, 0.0f, SPEED);
 		gameObject->transform->position += (*velocity) * t;
 
 		/******************
@@ -494,18 +499,11 @@ struct Meteor {
 			create_flames(pm);
 			pm->scene.drawables.erase(drop_shadow);
 			pm->scene.drawables.erase(gameObject->drawable);
+			return true;
 
-			for (auto iter = meteor_list.cbegin(); iter != meteor_list.cend(); iter++) {
-				if (this == *iter) {
-					meteor_list.erase(iter);
-					break;
-				}
-			}
-
-			free(gameObject->transform);
-			free(gameObject);
-			free(physicsObject);
-			printf("hrm");
+			// free(gameObject->transform);
+			// free(gameObject);
+			// free(physicsObject);
 		}
 
 		// meteor->building, meteor->tree, meteor->ground
@@ -516,39 +514,18 @@ struct Meteor {
 				if (collider->collider_test(other)) {
 					// create flames, destroy self, remove from meteors
 					create_flames(pm);
+					pm->scene.drawables.erase(drop_shadow);
 					pm->scene.drawables.erase(gameObject->drawable);
-					free(gameObject->transform);
-					free(gameObject);
-					free(physicsObject);
-
-					for (auto iter = meteor_list.cbegin(); iter != meteor_list.cend(); iter++) {
-						if (this == *iter) {
-							meteor_list.erase(iter);
-							break;
-						}
-					}
-				}
-			}
-			else if (otherTag == "player") {
-				if (collider->collider_test(other)) {
-					// create flames
-					create_flames(pm);
-
-					// remove me
-					pm->scene.drawables.erase(gameObject->drawable);
-
-					free(gameObject->transform);
-					free(gameObject);
-					free(physicsObject);
-					for (auto iter = meteor_list.cbegin(); iter != meteor_list.cend(); iter++) {
-						if (this == *iter) {
-							meteor_list.erase(iter);
-							break;
-						}
-					}
+					// pm->scene.drawables.erase(gameObject->drawable);
+					// free(gameObject->transform);
+					// free(gameObject);
+					// free(physicsObject);
+					return true;
 				}
 			}
 		}
+
+		return false;
 	};
 };
 
@@ -739,7 +716,7 @@ struct MeteorSpawner {
 									 -30.0f + (62.0f * ((float)std::rand()) / ((float)RAND_MAX)), SPAWN_HEIGHT);
 			// tf->rotation = glm::quat(1.0f, std::numbers::pi_v<float> / 4.0f, 0.0f, 0.0f);
 			std::list<Scene::Drawable>::const_iterator dr = pm->new_drawable(burnin_meshes->lookup("Meteor"), tf, pm);
-			Meteor *meteor = new Meteor{new GameObject{tf, dr}};
+			Meteor *meteor = new Meteor(new GameObject{tf, dr});
 			
 			Scene::Transform *tf_ds = new Scene::Transform();
 			tf_ds->name = "meteor_shadow";
@@ -815,7 +792,7 @@ PlayMode::PlayMode() : scene(*burnin_scene) {
 		Scene::Transform *tf_ds = new Scene::Transform();
 		tf_ds->name = "medal_shadow";
 		tf_ds->position = {0.0f, 0.0f, 0.1f};
-		tf_ds->scale = {0.9f, 0.9f, 1.0f};
+		tf_ds->scale = {2.0f, 2.0f, 1.0f};
 		std::list<Scene::Drawable>::const_iterator dr_ds = new_drawable(burnin_meshes->lookup("Shadow"), tf_ds, this);
 
 		theMedal = new Medal(new GameObject{tf, dr});
@@ -1159,12 +1136,19 @@ void PlayMode::update(float elapsed) {
 		// for (Spring spring : springs) {
 		// 	spring->update(elapsed)
 		// }
-		for (Meteor *meteor : meteors) {
-			meteor->update(elapsed, allColliders, meteors, this);
-		}
-		for (Flame *flame : flames) {
-			flame->update(elapsed, allColliders, this);
-		}
+		// for (Meteor *meteor : meteors) {
+		// 	meteor->update(elapsed, allColliders, meteors, this);
+		// }
+		// for (auto iter = meteors.cbegin(); iter != meteors.cend(); iter++) {
+		// 	if ((*iter)->update(elapsed, allColliders, this)) {
+		// 		auto destroyed = iter;
+		// 		iter--;
+		// 		meteors.erase(destroyed);
+		// 	}
+		// }
+		// for (Flame *flame : flames) {
+		// 	flame->update(elapsed, allColliders, this);
+		// }
 	}
 
 
